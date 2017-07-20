@@ -16,7 +16,8 @@ def get_AP_onsets(v, threshold=-45):
     """
     return np.nonzero(np.diff(np.sign(v-threshold)) == 2)[0]
 
-def get_AP_max(v, AP_onset, AP_end, order=5, interval=None):
+
+def get_AP_max_idx(v, AP_onset, AP_end, order=5, interval=None):
     """
     Returns the index of the local maximum of the AP between AP onset and end during dur.
     :param AP_onset: Index where the membrane potential crosses the AP threshold.
@@ -39,7 +40,8 @@ def get_AP_max(v, AP_onset, AP_end, order=5, interval=None):
     else:
         return maxima[np.argmax(v[AP_onset:AP_end][maxima])] + AP_onset
 
-def get_fAHP_min(v, AP_max, AP_end, order=5, interval=None):
+
+def get_fAHP_min_idx(v, AP_max, AP_end, order=5, interval=None):
     """
     Returns the index of the local minimum found after AP maximum.
     :param AP_max: Index of the maximum of the AP.
@@ -63,7 +65,7 @@ def get_fAHP_min(v, AP_max, AP_end, order=5, interval=None):
         return minima[np.argmin(v[AP_max:AP_end][minima])] + AP_max
 
 
-def get_fAHP_min_splines(v, t, AP_max, AP_end, order=5, interval=None, w=None, s=None, k=3):
+def get_fAHP_min_idx_using_splines(v, t, AP_max, AP_end, order=5, interval=None, w=None, s=None, k=3):
 
     splines = UnivariateSpline(t[AP_max:AP_end], v[AP_max:AP_end], w=w[AP_max:AP_end], s=s, k=k)
     v_new = splines(t[AP_max:AP_end])
@@ -76,13 +78,13 @@ def get_fAHP_min_splines(v, t, AP_max, AP_end, order=5, interval=None, w=None, s
     # pl.ylim(-65, -50)
     # pl.show()
 
-    fAHP_min = get_fAHP_min(v_new, 0, len(v_new), order, interval)
-    if fAHP_min is None:
+    fAHP_min_idx = get_fAHP_min_idx(v_new, 0, len(v_new), order, interval)
+    if fAHP_min_idx is None:
         return None
-    return fAHP_min + AP_max
+    return fAHP_min_idx + AP_max
 
 
-def get_DAP_max(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None):
+def get_DAP_max_idx(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None):
     """
     Returns the index of the local maximum found after fAHP.
     :param fAHP_min: Index of the minimum of the fAHP.
@@ -108,7 +110,7 @@ def get_DAP_max(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None):
         return maxima[np.argmax(v[fAHP_min:AP_end][maxima])] + fAHP_min
     
 
-def get_DAP_max_splines(v, t, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None, w=None, s=None, k=3):
+def get_DAP_max_idx_using_splines(v, t, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None, w=None, s=None, k=3):
     splines = UnivariateSpline(t[fAHP_min:AP_end], v[fAHP_min:AP_end], w=w[fAHP_min:AP_end], s=s, k=k)
     v_new = splines(t[fAHP_min:AP_end])
 
@@ -120,10 +122,10 @@ def get_DAP_max_splines(v, t, fAHP_min, AP_end, order=5, interval=None, dist_to_
     # pl.ylim(-65, -50)
     # pl.show()
 
-    DAP_max = get_DAP_max(v_new, 0, len(v_new), order, interval, dist_to_max)
-    if DAP_max is None:
+    DAP_max_idx = get_DAP_max_idx(v_new, 0, len(v_new), order, interval, dist_to_max)
+    if DAP_max_idx is None:
         return None
-    return DAP_max + fAHP_min
+    return DAP_max_idx + fAHP_min
 
 
 def get_AP_amp(v, AP_max, vrest):
@@ -137,6 +139,27 @@ def get_AP_amp(v, AP_max, vrest):
     :rtype: float
     """
     return v[AP_max] - vrest
+
+
+def get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest):
+    """
+    Computes the width at half maximum of the AP.
+    :param AP_onset: Index where the membrane potential crosses the AP threshold.
+    :type AP_onset: int
+    :param AP_max: Index of the maximum of the AP.
+    :type AP_max: int
+    :param AP_end: Index of the end of the AP (e.g. delimited by the onset of the next AP or the end of the trace).
+    :type AP_end: int
+    :param vrest: Resting potential.
+    :type vrest: float
+    :return: Indices of where voltage crosses the AP half maximum.
+    :rtype: Union[int, int]
+    """
+    halfmax = (v[AP_max] - vrest)/2
+    width1_idx = np.argmin(np.abs(v[AP_onset:AP_max]-vrest-halfmax)) + AP_onset
+    width2_idx = np.argmin(np.abs(v[AP_max:AP_end]-vrest-halfmax)) + AP_max
+    return width1_idx, width2_idx
+
 
 def get_AP_width(v, t, AP_onset, AP_max, AP_end, vrest):
     """
@@ -152,10 +175,9 @@ def get_AP_width(v, t, AP_onset, AP_max, AP_end, vrest):
     :return: AP width at half maximum.
     :rtype: float
     """
-    halfmax = (v[AP_max] - vrest)/2
-    width1 = np.argmin(np.abs(v[AP_onset:AP_max]-vrest-halfmax)) + AP_onset
-    width2 = np.argmin(np.abs(v[AP_max:AP_end]-vrest-halfmax)) + AP_max
+    width1, width2 = get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest)
     return t[width2] - t[width1]
+
 
 def get_DAP_amp(v, DAP_max, vrest):
     """
@@ -169,6 +191,7 @@ def get_DAP_amp(v, DAP_max, vrest):
     """
     return v[DAP_max] - vrest
 
+
 def get_DAP_deflection(v, fAHP_min, DAP_max):
     """
     Computes the deflection of the DAP (the height of the depolarization in relation to the minimum of the fAHP).
@@ -180,6 +203,29 @@ def get_DAP_deflection(v, fAHP_min, DAP_max):
     :rtype: float
     """
     return np.abs(v[DAP_max] - v[fAHP_min])
+
+
+def get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest):
+    """
+    Width of the DAP (distance between the time point of the minimum of the fAHP and the time point where the
+    downhill side of the DAP is closest to the half amplitude of the minimum of the fAHP).
+    :param fAHP_min: Index of the Minimum of the fAHP
+    :type fAHP_min: int
+    :param DAP_max: Index of maximum of the DAP.
+    :type DAP_max: int
+    :param AP_end: Index of the end of the AP (e.g. delimited by the onset of the next AP or the end of the trace)
+    :type AP_end: int
+    :param vrest: Resting potential.
+    :type vrest: float
+    :return: Idx where voltage crosses the halfwidth of the DAP.
+    :rtype: int
+    """
+    halfmax = (v[fAHP_min] - vrest)/2
+    halfmax_crossings = np.nonzero(np.diff(np.sign(v[DAP_max:AP_end]-vrest-halfmax)) == -2)[0]
+    if len(halfmax_crossings) == 0:
+        return None
+    halfwidth_idx = halfmax_crossings[0] + DAP_max
+    return halfwidth_idx
 
 def get_DAP_width(v, t, fAHP_min, DAP_max, AP_end, vrest):
     """
@@ -196,12 +242,11 @@ def get_DAP_width(v, t, fAHP_min, DAP_max, AP_end, vrest):
     :return: Width of the DAP.
     :rtype: float
     """
-    halfmax = (v[fAHP_min] - vrest)/2
-    halfmax_crossings = np.nonzero(np.diff(np.sign(v[DAP_max:AP_end]-vrest-halfmax)) == -2)[0]
-    if len(halfmax_crossings) == 0:
+    halfwidth_idx = get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest)
+    if halfwidth_idx is None:
         return None
-    halfwidth = halfmax_crossings[0] + DAP_max
-    return t[halfwidth] - t[fAHP_min]
+    return t[halfwidth_idx] - t[fAHP_min]
+
 
 def get_v_rest(v, i_inj):
     """
@@ -274,9 +319,9 @@ if __name__ == "__main__":
     AP_onset = AP_onsets[0]
     AP_end = -1
 
-    AP_max = get_AP_max(v_exp, AP_onset, AP_end, interval=1/dt_exp)
-    fAHP_min = get_fAHP_min(v_exp, AP_max, AP_end, interval=5/dt_exp)
-    DAP_max = get_DAP_max(v_exp, fAHP_min, AP_end, interval=10/dt_exp)
+    AP_max = get_AP_max_idx(v_exp, AP_onset, AP_end, interval=1 / dt_exp)
+    fAHP_min = get_fAHP_min_idx(v_exp, AP_max, AP_end, interval=5 / dt_exp)
+    DAP_max = get_DAP_max_idx(v_exp, fAHP_min, AP_end, interval=10 / dt_exp)
 
     AP_amp = get_AP_amp(v_exp, AP_max, vrest)
     AP_width = get_AP_width(v_exp, t_exp, AP_onset, AP_max, AP_end, vrest)
