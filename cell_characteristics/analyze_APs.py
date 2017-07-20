@@ -1,5 +1,6 @@
 from __future__ import division
 from scipy.signal import argrelmin, argrelmax
+from scipy.interpolate import UnivariateSpline
 import numpy as np
 
 __author__ = 'caro'
@@ -61,7 +62,27 @@ def get_fAHP_min(v, AP_max, AP_end, order=5, interval=None):
     else:
         return minima[np.argmin(v[AP_max:AP_end][minima])] + AP_max
 
-def get_DAP_max(v, fAHP_min, AP_end, order=5, interval=None):
+
+def get_fAHP_min_splines(v, t, AP_max, AP_end, order=5, interval=None, w=None, s=None, k=3):
+
+    splines = UnivariateSpline(t[AP_max:AP_end], v[AP_max:AP_end], w=w[AP_max:AP_end], s=s, k=k)
+    v_new = splines(t[AP_max:AP_end])
+
+    # import matplotlib.pyplot as pl
+    # pl.figure()
+    # pl.plot(t, v, 'k')
+    # pl.plot(t[AP_max:AP_end], v_new, 'r')
+    # pl.xlim(5.6, 8)
+    # pl.ylim(-65, -50)
+    # pl.show()
+
+    fAHP_min = get_fAHP_min(v_new, 0, len(v_new), order, interval)
+    if fAHP_min is None:
+        return None
+    return fAHP_min + AP_max
+
+
+def get_DAP_max(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None):
     """
     Returns the index of the local maximum found after fAHP.
     :param fAHP_min: Index of the minimum of the fAHP.
@@ -78,11 +99,32 @@ def get_DAP_max(v, fAHP_min, AP_end, order=5, interval=None):
     maxima = argrelmax(v[fAHP_min:AP_end], order=order)[0]
     if interval is not None:
         maxima = maxima[maxima < interval]
+    if dist_to_max is not None:
+        maxima = maxima[maxima >= dist_to_max]
 
     if np.size(maxima) == 0:
         return None
     else:
         return maxima[np.argmax(v[fAHP_min:AP_end][maxima])] + fAHP_min
+    
+
+def get_DAP_max_splines(v, t, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None, w=None, s=None, k=3):
+    splines = UnivariateSpline(t[fAHP_min:AP_end], v[fAHP_min:AP_end], w=w[fAHP_min:AP_end], s=s, k=k)
+    v_new = splines(t[fAHP_min:AP_end])
+
+    # import matplotlib.pyplot as pl
+    # pl.figure()
+    # pl.plot(t, v, 'k')
+    # pl.plot(t[fAHP_min:AP_end], v_new, 'r')
+    # pl.xlim(5.6, 20)
+    # pl.ylim(-65, -50)
+    # pl.show()
+
+    DAP_max = get_DAP_max(v_new, 0, len(v_new), order, interval, dist_to_max)
+    if DAP_max is None:
+        return None
+    return DAP_max + fAHP_min
+
 
 def get_AP_amp(v, AP_max, vrest):
     """
@@ -155,7 +197,10 @@ def get_DAP_width(v, t, fAHP_min, DAP_max, AP_end, vrest):
     :rtype: float
     """
     halfmax = (v[fAHP_min] - vrest)/2
-    halfwidth = np.nonzero(np.diff(np.sign(v[DAP_max:AP_end]-vrest-halfmax)) == -2)[0][0] + DAP_max
+    halfmax_crossings = np.nonzero(np.diff(np.sign(v[DAP_max:AP_end]-vrest-halfmax)) == -2)[0]
+    if len(halfmax_crossings) == 0:
+        return None
+    halfwidth = halfmax_crossings[0] + DAP_max
     return t[halfwidth] - t[fAHP_min]
 
 def get_v_rest(v, i_inj):
