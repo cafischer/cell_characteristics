@@ -6,7 +6,7 @@ import numpy as np
 __author__ = 'caro'
 
 
-def get_AP_onsets(v, threshold=-45):
+def get_AP_onset_idxs(v, threshold=-45):
     """
     Returns the indices of the times where the membrane potential crossed threshold.
     :param threshold: AP threshold.
@@ -289,7 +289,7 @@ def get_inputresistance(v, i_inj):
 
 
 def get_AP_start_end(v, threshold=-45, n=0):
-    AP_onsets = get_AP_onsets(v, threshold)
+    AP_onsets = get_AP_onset_idxs(v, threshold)
     if len(AP_onsets) < n+1:
         return None, None
     else:
@@ -315,7 +315,7 @@ if __name__ == "__main__":
     dt_exp = t_exp[1]-t_exp[0]
 
     vrest = get_v_rest(v_exp, i_exp)
-    AP_onsets = get_AP_onsets(v_exp, threshold=-30)
+    AP_onsets = get_AP_onset_idxs(v_exp, threshold=-30)
     AP_onset = AP_onsets[0]
     AP_end = -1
 

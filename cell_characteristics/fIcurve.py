@@ -1,5 +1,5 @@
 import numpy as np
-from analyze_APs import get_AP_onsets
+from analyze_APs import get_AP_onset_idxs
 
 
 def compute_fIcurve(v_traces, i_traces, t_trace):
@@ -11,7 +11,7 @@ def compute_fIcurve(v_traces, i_traces, t_trace):
 
     firing_rates = np.zeros(len(amps))
     for i, amp in enumerate(amps):
-        AP_onsets = get_AP_onsets(v_traces[i], threshold=0)
+        AP_onsets = get_AP_onset_idxs(v_traces[i], threshold=0)
         n_APs = len(AP_onsets)
         firing_rates[i] = n_APs / dur_step
     return amps, firing_rates
@@ -24,7 +24,7 @@ def compute_fIcurve_last_ISI(v_traces, i_traces, t_trace):
 
     firing_rates = np.zeros(len(amps))
     for i, amp in enumerate(amps):
-        AP_onsets = get_AP_onsets(v_traces[i], threshold=0)
+        AP_onsets = get_AP_onset_idxs(v_traces[i], threshold=0)
         if len(AP_onsets) >= 2:
             firing_rates[i] = AP_onsets[-1] * dt - AP_onsets[-2] * dt
         else:
