@@ -1,7 +1,11 @@
 from __future__ import division
+from cell_characteristics import to_idx, exp_fit
 from scipy.signal import argrelmin, argrelmax
 from scipy.interpolate import UnivariateSpline
+from scipy.optimize import curve_fit
+from functools import partial
 import numpy as np
+import matplotlib.pyplot as pl
 
 __author__ = 'caro'
 
@@ -17,7 +21,7 @@ def get_AP_onset_idxs(v, threshold=-45):
     return np.nonzero(np.diff(np.sign(v-threshold)) == 2)[0]
 
 
-def get_AP_max_idx(v, AP_onset, AP_end, order=5, interval=None):
+def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None):
     """
     Returns the index of the local maximum of the AP between AP onset and end during dur.
     :param AP_onset: Index where the membrane potential crosses the AP threshold.
@@ -41,7 +45,7 @@ def get_AP_max_idx(v, AP_onset, AP_end, order=5, interval=None):
         return maxima[np.argmax(v[AP_onset:AP_end][maxima])] + AP_onset
 
 
-def get_fAHP_min_idx(v, AP_max, AP_end, order=5, interval=None):
+def get_fAHP_min_idx(v, AP_max, AP_end, order=1, interval=None):
     """
     Returns the index of the local minimum found after AP maximum.
     :param AP_max: Index of the maximum of the AP.
@@ -65,26 +69,26 @@ def get_fAHP_min_idx(v, AP_max, AP_end, order=5, interval=None):
         return minima[np.argmin(v[AP_max:AP_end][minima])] + AP_max
 
 
-def get_fAHP_min_idx_using_splines(v, t, AP_max, AP_end, order=5, interval=None, w=None, s=None, k=3):
-
-    splines = UnivariateSpline(t[AP_max:AP_end], v[AP_max:AP_end], w=w[AP_max:AP_end], s=s, k=k)
-    v_new = splines(t[AP_max:AP_end])
+def get_fAHP_min_idx_using_splines(v, t, AP_max_idx, AP_end, order=None, interval=None, w=None, s=None, k=3):
+    
+    if w is not None:
+        w = w[AP_max_idx:AP_end]
+    splines = UnivariateSpline(t[AP_max_idx:AP_end], v[AP_max_idx:AP_end], w=w, s=s, k=k)
+    v_new = splines(t[AP_max_idx:AP_end])
 
     # import matplotlib.pyplot as pl
     # pl.figure()
     # pl.plot(t, v, 'k')
-    # pl.plot(t[AP_max:AP_end], v_new, 'r')
-    # pl.xlim(5.6, 8)
-    # pl.ylim(-65, -50)
+    # pl.plot(t[AP_max_idx:AP_end], v_new, 'r')
     # pl.show()
 
     fAHP_min_idx = get_fAHP_min_idx(v_new, 0, len(v_new), order, interval)
     if fAHP_min_idx is None:
         return None
-    return fAHP_min_idx + AP_max
+    return fAHP_min_idx + AP_max_idx
 
 
-def get_DAP_max_idx(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None):
+def get_DAP_max_idx(v, fAHP_min, AP_end, order=None, interval=None, min_dist_to_max=None):
     """
     Returns the index of the local maximum found after fAHP.
     :param fAHP_min: Index of the minimum of the fAHP.
@@ -101,8 +105,8 @@ def get_DAP_max_idx(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=Non
     maxima = argrelmax(v[fAHP_min:AP_end], order=order)[0]
     if interval is not None:
         maxima = maxima[maxima < interval]
-    if dist_to_max is not None:
-        maxima = maxima[maxima >= dist_to_max]
+    if min_dist_to_max is not None:
+        maxima = maxima[maxima >= min_dist_to_max]
 
     if np.size(maxima) == 0:
         return None
@@ -110,19 +114,18 @@ def get_DAP_max_idx(v, fAHP_min, AP_end, order=5, interval=None, dist_to_max=Non
         return maxima[np.argmax(v[fAHP_min:AP_end][maxima])] + fAHP_min
     
 
-def get_DAP_max_idx_using_splines(v, t, fAHP_min, AP_end, order=5, interval=None, dist_to_max=None, w=None, s=None, k=3):
-    splines = UnivariateSpline(t[fAHP_min:AP_end], v[fAHP_min:AP_end], w=w[fAHP_min:AP_end], s=s, k=k)
+def get_DAP_max_idx_using_splines(v, t, fAHP_min, AP_end, order=None, interval=None, min_dist_to_max=None, w=None,
+                                  s=None, k=3):
+    splines = UnivariateSpline(t, v, w=w, s=s, k=k)
     v_new = splines(t[fAHP_min:AP_end])
 
     # import matplotlib.pyplot as pl
     # pl.figure()
     # pl.plot(t, v, 'k')
     # pl.plot(t[fAHP_min:AP_end], v_new, 'r')
-    # pl.xlim(5.6, 20)
-    # pl.ylim(-65, -50)
     # pl.show()
 
-    DAP_max_idx = get_DAP_max_idx(v_new, 0, len(v_new), order, interval, dist_to_max)
+    DAP_max_idx = get_DAP_max_idx(v_new, 0, len(v_new), order, interval, min_dist_to_max)
     if DAP_max_idx is None:
         return None
     return DAP_max_idx + fAHP_min
@@ -156,9 +159,9 @@ def get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest):
     :rtype: Union[int, int]
     """
     halfmax = (v[AP_max] - vrest)/2
-    width1_idx = np.argmin(np.abs(v[AP_onset:AP_max]-vrest-halfmax)) + AP_onset
-    width2_idx = np.argmin(np.abs(v[AP_max:AP_end]-vrest-halfmax)) + AP_max
-    return width1_idx, width2_idx
+    start_idx = np.argmin(np.abs(v[AP_onset:AP_max]-vrest-halfmax)) + AP_onset
+    end_idx = np.argmin(np.abs(v[AP_max:AP_end]-vrest-halfmax)) + AP_max
+    return start_idx, end_idx
 
 
 def get_AP_width(v, t, AP_onset, AP_max, AP_end, vrest):
@@ -175,8 +178,8 @@ def get_AP_width(v, t, AP_onset, AP_max, AP_end, vrest):
     :return: AP width at half maximum.
     :rtype: float
     """
-    width1, width2 = get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest)
-    return t[width2] - t[width1]
+    start_idx, end_idx = get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest)
+    return t[end_idx] - t[start_idx]
 
 
 def get_DAP_amp(v, DAP_max, vrest):
@@ -299,6 +302,173 @@ def get_AP_start_end(v, threshold=-45, n=0):
         else:
             AP_end = AP_onsets[n+1]
         return AP_onset, AP_end
+    
+    
+def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_interval=None,
+                              std_idx_times=(None, None), k_splines=None, s_splines=None, order_fAHP_min=None,
+                              DAP_interval=None, order_DAP_max=None, min_dist_to_DAP_max=None, check=False):
+    """
+    Computes the spike characteristics defined in return_characteristics.
+
+    :param v: Membrane Potential (must just contain one spike or set up proper intervals).
+    :type v: np.array
+    :param t: Time.
+    :type t: np.array
+    :param return_characteristics: Name of characteristics that shall be returned. Options: AP_amp, AP_width, DAP_amp,
+                                   DAP_deflection, DAP_width, DAP_time, DAP_lin_slope, DAP_exp_slope.
+    :type return_characteristics: list[str]
+    :param v_rest: Resting potential.
+    :type v_rest: float
+    :param AP_interval: Maximal time (ms) between crossing AP threshold and AP peak.
+    :type AP_interval: float
+    :param std_idxs: Time (ms) of the start and end indices for the region in which the std of v shall be estimated.
+    :type std_idxs: tuple[float, float]
+    :param order_fAHP_min: Time interval (ms) to consider around the minimum for the comparison.
+    :type order_fAHP_min: float
+    :param DAP_interval: Maximal time (ms) between the fAHP_min and the DAP peak.
+    :type DAP_interval: float
+    :param order_DAP_max: Time interval (ms) to consider around the maximum for the comparison.
+    :type order_DAP_max: float
+    :param min_dist_to_DAP_max: 
+    :param check: Whether to print and plot the computed values.
+    :type check: bool
+    :return: Return characteristics.
+    :rtype: list[float]
+    """
+    dt = t[1] - t[0]
+
+    characteristics = {k: np.nan for k in return_characteristics}
+    characteristics['v_rest'] = v_rest
+    characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
+    characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
+                                   for std_idx_time in std_idx_times]
+    characteristics['k_splines'] = k_splines if not k_splines is None else 3
+    characteristics['s_splines'] = s_splines
+    characteristics['order_fAHP_min_idx'] = to_idx(order_fAHP_min, dt) if not order_fAHP_min is None else 1
+    characteristics['DAP_interval_idx'] = to_idx(DAP_interval, dt) if not DAP_interval is None else None
+    characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
+    characteristics['min_dist_to_DAP_max'] = min_dist_to_DAP_max if not min_dist_to_DAP_max is None else None
+
+    AP_onset, AP_end = get_AP_start_end(v, AP_threshold)
+    if AP_onset is None or AP_end is None:
+        print 'No AP found!'
+        return [characteristics[k] for k in return_characteristics]
+
+    characteristics['AP_max_idx'] = get_AP_max_idx(v, AP_onset, AP_end, interval=characteristics['AP_interval_idx'])
+    if characteristics['AP_max_idx'] is None:
+        if check:
+            check_measures(v, t, characteristics)
+        return [characteristics[k] for k in return_characteristics]
+
+    characteristics['AP_amp'] = get_AP_amp(v, characteristics['AP_max_idx'], characteristics['v_rest'])
+    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset, characteristics['AP_max_idx'], AP_end,
+                                                         characteristics['v_rest'])
+    characteristics['AP_width'] = get_AP_width(v, t, AP_onset, characteristics['AP_max_idx'], AP_end,
+                                               characteristics['v_rest'])
+
+    std = np.std(v[characteristics['std_idxs'][0]:characteristics['std_idxs'][1]])
+    w = np.ones(len(v)) / std
+    characteristics['fAHP_min_idx'] = get_fAHP_min_idx_using_splines(v, t, characteristics['AP_max_idx'], len(t),
+                                                                     order=characteristics['order_fAHP_min_idx'],
+                                                                     interval=characteristics['AP_interval_idx'], w=w,
+                                                                     k=characteristics['k_splines'],
+                                                                     s=characteristics['s_splines'])
+    if characteristics['fAHP_min_idx'] is None:
+        if check:
+            check_measures(v, t, characteristics)
+        return [characteristics[k] for k in return_characteristics]
+
+    characteristics['DAP_max_idx'] = get_DAP_max_idx_using_splines(v, t, int(characteristics['fAHP_min_idx']), len(t),
+                                                                   order=characteristics['order_DAP_max_idx'],
+                                                                   interval=characteristics['DAP_interval_idx'],
+                                                                   min_dist_to_max=min_dist_to_DAP_max, w=w,
+                                                                   k=characteristics['k_splines'],
+                                                                   s=characteristics['s_splines'])
+    if characteristics['DAP_max_idx'] is None:
+        if check:
+            check_measures(v, t, characteristics)
+        return [characteristics[k] for k in return_characteristics]
+
+    characteristics['DAP_amp'] = get_DAP_amp(v, int(characteristics['DAP_max_idx']), characteristics['v_rest'])
+    characteristics['DAP_deflection'] = get_DAP_deflection(v, int(characteristics['fAHP_min_idx']),
+                                                           int(characteristics['DAP_max_idx']))
+    characteristics['DAP_width_idx'] = get_DAP_width_idx(v, t, int(characteristics['fAHP_min_idx']),
+                                                         int(characteristics['DAP_max_idx']), len(t),
+                                                         characteristics['v_rest'])
+    characteristics['DAP_width'] = get_DAP_width(v, t, int(characteristics['fAHP_min_idx']),
+                                                 int(characteristics['DAP_max_idx']), len(t), characteristics['v_rest'])
+    characteristics['DAP_time'] = t[int(round(characteristics['DAP_max_idx']))] - t[characteristics['AP_max_idx']]
+
+    if characteristics['DAP_width_idx'] is None:
+        if check:
+            check_measures(v, t, characteristics)
+        return [characteristics[k] for k in return_characteristics]
+
+    characteristics['half_fAHP_crossings'] = np.nonzero(np.diff(np.sign(v[int(characteristics['DAP_max_idx']):len(t)]
+                                                     - v[int(characteristics['fAHP_min_idx'])])) == -2)[0]
+    if len(characteristics['half_fAHP_crossings']) == 0:
+        if check:
+            check_measures(v, t, characteristics)
+        return [characteristics[k] for k in return_characteristics]
+
+    half_fAHP_idx = characteristics['half_fAHP_crossings'][0] + characteristics['DAP_max_idx']
+    characteristics['slope_start'] = half_fAHP_idx
+    characteristics['slope_end'] = len(t) - 1
+    characteristics['DAP_lin_slope'] = np.abs((v[int(characteristics['slope_end'])] - v[int(characteristics['slope_start'])])
+                              / (t[int(characteristics['slope_end'])] - t[int(characteristics['slope_start'])]))
+
+    characteristics['DAP_exp_slope'] = curve_fit(
+        partial(exp_fit, v=v[int(characteristics['slope_start']):int(characteristics['slope_end'])]),
+        np.arange(characteristics['slope_end']-int(characteristics['slope_start'])) * dt,
+        v[int(characteristics['slope_start']):int(characteristics['slope_end'])],
+        p0=1, bounds=(0, np.inf))[0][0]
+    if check:
+        check_measures(v, t, characteristics)
+    return [characteristics[k] for k in return_characteristics]
+
+
+def check_measures(v, t, characteristics):
+    dt = t[1] - t[0]
+    if not characteristics.get('AP_max_idx') is None:
+        print 'AP_amp (mV): ', characteristics['AP_amp']
+        print 'AP_width (ms): ', characteristics['AP_width']
+        if not characteristics.get('DAP_max_idx') is None:
+            print 'DAP_amp: (mV): ', characteristics['DAP_amp']
+            print 'DAP_width: (ms): ', characteristics['DAP_width']
+            print 'DAP time: (ms): ', characteristics['DAP_time']
+            if not characteristics.get('DAP_exp_slope') is None:
+                print 'DAP_exp_slope: ', characteristics['DAP_exp_slope']
+                print 'DAP_lin_slope: ', characteristics['DAP_lin_slope']
+
+    pl.figure()
+    pl.plot(t, v)
+    pl.plot(t[characteristics['AP_max_idx']], v[characteristics['AP_max_idx']], 'or', label='AP_max_idx')
+    if not characteristics.get('AP_width_idxs') is None:
+        pl.plot(t[np.array(characteristics['AP_width_idxs'])],
+                v[np.array(characteristics['AP_width_idxs'])], '-or', label='AP_width')
+    if not characteristics.get('fAHP_min_idx') is None:
+        pl.plot(t[int(characteristics['fAHP_min_idx'])], v[int(characteristics['fAHP_min_idx'])], 'og', label='fAHP')
+        if not characteristics.get('DAP_max_idx') is None:
+            pl.plot(t[int(characteristics['DAP_max_idx'])], v[int(characteristics['DAP_max_idx'])], 'ob',
+                    label='DAP_max')
+        if not characteristics.get('DAP_width_idx') is None:
+            pl.plot([t[int(characteristics['fAHP_min_idx'])], t[int(characteristics['DAP_width_idx'])]],
+                    [v[int(characteristics['fAHP_min_idx'])]
+                     - (v[int(characteristics['fAHP_min_idx'])] - characteristics['v_rest']) / 2,
+                     v[int(characteristics['DAP_width_idx'])]],
+                    '-ob', label='DAP_width')
+        if not characteristics.get('slope_start') is None and not characteristics.get('slope_end') is None:
+            pl.plot([t[int(characteristics['slope_start'])], t[int(characteristics['slope_end'])]],
+                    [v[int(characteristics['slope_start'])], v[int(characteristics['slope_end'])]],
+                    '-oy', label='lin_slope')
+
+            pl.plot(t[int(characteristics['slope_start']): int(characteristics['slope_end'])],
+                    exp_fit(np.arange(int(characteristics['slope_end'])-int(characteristics['slope_start'])) * dt,
+                            characteristics['DAP_exp_slope'],
+                            v[int(characteristics['slope_start']):int(characteristics['slope_end'])]), 'y',
+                    label='exp_slope')
+    pl.legend()
+    pl.show()
 
 
 if __name__ == "__main__":
