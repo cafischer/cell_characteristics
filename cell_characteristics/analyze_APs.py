@@ -159,8 +159,17 @@ def get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest):
     :rtype: Union[int, int]
     """
     halfmax = (v[AP_max] - vrest)/2
-    start_idx = np.argmin(np.abs(v[AP_onset:AP_max]-vrest-halfmax)) + AP_onset
-    end_idx = np.argmin(np.abs(v[AP_max:AP_end]-vrest-halfmax)) + AP_max
+
+    start_idx = np.nonzero(np.diff(np.sign(v[AP_onset:AP_max]-vrest-halfmax)) == 2)[0]
+    if len(start_idx) > 0:
+        start_idx = start_idx[0] + AP_onset
+    else:
+        start_idx = None
+    end_idx = np.nonzero(np.diff(np.sign(v[AP_max:AP_end]-vrest-halfmax)) == -2)[0]
+    if len(end_idx) > 0:
+        end_idx = end_idx[0] + AP_max
+    else:
+        end_idx = None
     return start_idx, end_idx
 
 
@@ -179,7 +188,10 @@ def get_AP_width(v, t, AP_onset, AP_max, AP_end, vrest):
     :rtype: float
     """
     start_idx, end_idx = get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest)
-    return t[end_idx] - t[start_idx]
+    if start_idx is not None and end_idx is not None:
+        return t[end_idx] - t[start_idx]
+    else:
+        return None
 
 
 def get_DAP_amp(v, DAP_max, vrest):
@@ -321,8 +333,19 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     :type v_rest: float
     :param AP_interval: Maximal time (ms) between crossing AP threshold and AP peak.
     :type AP_interval: float
-    :param std_idxs: Time (ms) of the start and end indices for the region in which the std of v shall be estimated.
-    :type std_idxs: tuple[float, float]
+    :param std_idx_times: Time (ms) of the start and end indices for the region in which the std of v shall be estimated.
+    :type std_idx_times: tuple[float, float]
+    :param k_splines: Degree of the smoothing spline. Must be <= 5.
+    :type k_splines: int
+    :param s_splines: Positive smoothing factor used to choose the number of knots. Number of knots will be increased
+        until the smoothing condition is satisfied:
+
+            sum((w[i] * (y[i]-spl(x[i])))**2, axis=0) <= s
+
+        If None (default), ``s = len(w)`` which should be a good value if ``1/w[i]`` is an estimate of the
+        standard deviation of ``y[i]``.
+        If 0, spline will interpolate through all data points.
+    :type s_splines: float
     :param order_fAHP_min: Time interval (ms) to consider around the minimum for the comparison.
     :type order_fAHP_min: float
     :param DAP_interval: Maximal time (ms) between the fAHP_min and the DAP peak.
@@ -361,9 +384,11 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
         return [characteristics[k] for k in return_characteristics]
 
     characteristics['AP_amp'] = get_AP_amp(v, characteristics['AP_max_idx'], characteristics['v_rest'])
-    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset, characteristics['AP_max_idx'], AP_end,
+    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset, characteristics['AP_max_idx'],
+                                                         AP_onset + characteristics['AP_interval_idx'],
                                                          characteristics['v_rest'])
-    characteristics['AP_width'] = get_AP_width(v, t, AP_onset, characteristics['AP_max_idx'], AP_end,
+    characteristics['AP_width'] = get_AP_width(v, t, AP_onset, characteristics['AP_max_idx'],
+                                               AP_onset + characteristics['AP_interval_idx'],
                                                characteristics['v_rest'])
 
     std = np.std(v[characteristics['std_idxs'][0]:characteristics['std_idxs'][1]])
@@ -443,7 +468,7 @@ def check_measures(v, t, characteristics):
     pl.figure()
     pl.plot(t, v)
     pl.plot(t[characteristics['AP_max_idx']], v[characteristics['AP_max_idx']], 'or', label='AP_max_idx')
-    if not characteristics.get('AP_width_idxs') is None:
+    if not characteristics.get('AP_width_idxs')[0] is None and not characteristics.get('AP_width_idxs')[1] is None:
         pl.plot(t[np.array(characteristics['AP_width_idxs'])],
                 v[np.array(characteristics['AP_width_idxs'])], '-or', label='AP_width')
     if not characteristics.get('fAHP_min_idx') is None:
@@ -451,7 +476,7 @@ def check_measures(v, t, characteristics):
         if not characteristics.get('DAP_max_idx') is None:
             pl.plot(t[int(characteristics['DAP_max_idx'])], v[int(characteristics['DAP_max_idx'])], 'ob',
                     label='DAP_max')
-        if not characteristics.get('DAP_width_idx') is None:
+        if not characteristics.get('AP_width_idxs')[0] is None and not characteristics.get('AP_width_idxs')[1] is None:
             pl.plot([t[int(characteristics['fAHP_min_idx'])], t[int(characteristics['DAP_width_idx'])]],
                     [v[int(characteristics['fAHP_min_idx'])]
                      - (v[int(characteristics['fAHP_min_idx'])] - characteristics['v_rest']) / 2,
