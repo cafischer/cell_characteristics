@@ -4,9 +4,15 @@ import numpy as np
 __author__ = 'caro'
 
 
-def to_idx(time_point, dt):
+def to_idx(time_point, dt, decimal_place=None):
     idx = time_point/dt
-    assert idx * dt == time_point, 'Time points given are not uniquely identifiable given dt.'
+    if decimal_place:
+        assert np.round(idx * dt, decimal_place) == np.round(time_point, decimal_place), \
+            'Time points given are not uniquely identifiable given dt. ' \
+            'time_point: %f, dt: %f' % (time_point, dt)
+    else:
+        assert idx * dt == time_point, 'Time points given are not uniquely identifiable given dt. ' \
+                                       'time_point: %f, dt: %f' % (time_point, dt)
     return int(idx)
 
 
