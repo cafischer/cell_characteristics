@@ -21,7 +21,7 @@ def get_AP_onset_idxs(v, threshold=-45):
     return np.nonzero(np.diff(np.sign(v-threshold)) == 2)[0]
 
 
-def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None):
+def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None, add_noise=True):
     """
     Returns the index of the local maximum of the AP between AP onset and end during dur.
     :param AP_onset: Index where the membrane potential crosses the AP threshold.
@@ -35,7 +35,12 @@ def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None):
     :return: Index of the Maximum of the AP (None if it does not exist).
     :rtype: int
     """
-    maxima = argrelmax(v[AP_onset:AP_end], order=order)[0]
+    if add_noise:
+        maxima = argrelmax(v[AP_onset:AP_end] + np.random.uniform(-0.001, 0.001, len(v[AP_onset:AP_end])),
+                                                                  order=order)[0]  # add noise so that if two
+        # neighboring points are identical, one can be found as minimum
+    else:
+        maxima = argrelmax(v[AP_onset:AP_end], order=order)[0]
     if interval is not None:
         maxima = maxima[maxima < interval]
 
@@ -217,7 +222,7 @@ def get_DAP_deflection(v, fAHP_min, DAP_max):
     :return: Deflection of the DAP.
     :rtype: float
     """
-    return np.abs(v[DAP_max] - v[fAHP_min])
+    return v[DAP_max] - v[fAHP_min]
 
 
 def get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest):
@@ -237,7 +242,7 @@ def get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest):
     """
     halfmax = (v[fAHP_min] - vrest)/2
     halfmax_crossings = np.nonzero(np.diff(np.sign(v[DAP_max:AP_end]-vrest-halfmax)) == -2)[0]
-    if len(halfmax_crossings) == 0:
+    if len(halfmax_crossings) == 0 or vrest+halfmax > v[fAHP_min]:
         return None
     halfwidth_idx = halfmax_crossings[0] + DAP_max
     return halfwidth_idx
@@ -317,8 +322,9 @@ def get_AP_start_end(v, threshold=-45, n=0):
     
     
 def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_interval=None,
-                              std_idx_times=(None, None), k_splines=None, s_splines=None, order_fAHP_min=None,
-                              DAP_interval=None, order_DAP_max=None, min_dist_to_DAP_max=None, check=False):
+                              AP_width_before_onset=0, std_idx_times=(None, None), k_splines=None, s_splines=None,
+                              order_fAHP_min=None, DAP_interval=None, order_DAP_max=None, min_dist_to_DAP_max=None,
+                              check=False):
     """
     Computes the spike characteristics defined in return_characteristics.
 
@@ -363,6 +369,7 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     characteristics = {k: None for k in return_characteristics}
     characteristics['v_rest'] = v_rest
     characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
+    characteristics['AP_width_before_onset'] = to_idx(AP_width_before_onset, dt)
     characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
                                    for std_idx_time in std_idx_times]
     characteristics['k_splines'] = k_splines if not k_splines is None else 3
@@ -370,7 +377,7 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     characteristics['order_fAHP_min_idx'] = to_idx(order_fAHP_min, dt) if not order_fAHP_min is None else 1
     characteristics['DAP_interval_idx'] = to_idx(DAP_interval, dt) if not DAP_interval is None else None
     characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
-    characteristics['min_dist_to_DAP_max'] = min_dist_to_DAP_max if not min_dist_to_DAP_max is None else None
+    characteristics['min_dist_to_DAP_max'] = to_idx(min_dist_to_DAP_max, dt) if not min_dist_to_DAP_max is None else None
 
     AP_onset, AP_end = get_AP_start_end(v, AP_threshold)
     if AP_onset is None or AP_end is None:
@@ -384,10 +391,11 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
         return [characteristics[k] for k in return_characteristics]
 
     characteristics['AP_amp'] = get_AP_amp(v, characteristics['AP_max_idx'], characteristics['v_rest'])
-    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset, characteristics['AP_max_idx'],
+    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset - AP_width_before_onset,
+                                                         characteristics['AP_max_idx'],
                                                          AP_onset + characteristics['AP_interval_idx'],
                                                          characteristics['v_rest'])
-    characteristics['AP_width'] = get_AP_width(v, t, AP_onset, characteristics['AP_max_idx'],
+    characteristics['AP_width'] = get_AP_width(v, t, AP_onset - AP_width_before_onset, characteristics['AP_max_idx'],
                                                AP_onset + characteristics['AP_interval_idx'],
                                                characteristics['v_rest'])
     characteristics['AP_time'] = t[characteristics['AP_max_idx']]
@@ -407,7 +415,8 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     characteristics['DAP_max_idx'] = get_DAP_max_idx_using_splines(v, t, int(characteristics['fAHP_min_idx']), len(t),
                                                                    order=characteristics['order_DAP_max_idx'],
                                                                    interval=characteristics['DAP_interval_idx'],
-                                                                   min_dist_to_max=min_dist_to_DAP_max, w=w,
+                                                                   min_dist_to_max=characteristics['min_dist_to_DAP_max'],
+                                                                   w=w,
                                                                    k=characteristics['k_splines'],
                                                                    s=characteristics['s_splines'])
     if characteristics['DAP_max_idx'] is None:
