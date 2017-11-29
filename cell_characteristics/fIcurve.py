@@ -13,7 +13,7 @@ def compute_fIcurve(v_traces, i_traces, t_trace):
     for i, amp in enumerate(amps):
         AP_onsets = get_AP_onset_idxs(v_traces[i], threshold=0)
         n_APs = len(AP_onsets)
-        firing_rates[i] = n_APs / dur_step
+        firing_rates[i] = n_APs / dur_step * 1000  # convert to Hz
     return amps, firing_rates
 
 

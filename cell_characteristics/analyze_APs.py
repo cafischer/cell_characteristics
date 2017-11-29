@@ -10,7 +10,7 @@ import matplotlib.pyplot as pl
 __author__ = 'caro'
 
 
-def get_AP_onset_idxs(v, threshold=-45):
+def get_AP_onset_idxs(v, threshold=-30):
     """
     Returns the indices of the times where the membrane potential crossed threshold.
     :param threshold: AP threshold.
@@ -322,7 +322,7 @@ def get_AP_start_end(v, threshold=-45, n=0):
     
     
 def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_interval=None,
-                              AP_width_before_onset=0, std_idx_times=(None, None), k_splines=None, s_splines=None,
+                              AP_width_before_onset=0, fAHP_interval=None, std_idx_times=(None, None), k_splines=None, s_splines=None,
                               order_fAHP_min=None, DAP_interval=None, order_DAP_max=None, min_dist_to_DAP_max=None,
                               check=False):
     """
@@ -339,6 +339,8 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     :type v_rest: float
     :param AP_interval: Maximal time (ms) between crossing AP threshold and AP peak.
     :type AP_interval: float
+    :param fAHP_interval: Maximal time (ms) between AP peak and fAHP minimum.
+    :type fAHP_interval: float
     :param std_idx_times: Time (ms) of the start and end indices for the region in which the std of v shall be estimated.
     :type std_idx_times: tuple[float, float]
     :param k_splines: Degree of the smoothing spline. Must be <= 5.
@@ -370,6 +372,7 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     characteristics['v_rest'] = v_rest
     characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
     characteristics['AP_width_before_onset'] = to_idx(AP_width_before_onset, dt)
+    characteristics['fAHP_interval_idx'] = to_idx(fAHP_interval, dt) if not fAHP_interval is None else None
     characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
                                    for std_idx_time in std_idx_times]
     characteristics['k_splines'] = k_splines if not k_splines is None else 3
@@ -404,7 +407,7 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     w = np.ones(len(v)) / std
     characteristics['fAHP_min_idx'] = get_fAHP_min_idx_using_splines(v, t, characteristics['AP_max_idx'], len(t),
                                                                      order=characteristics['order_fAHP_min_idx'],
-                                                                     interval=characteristics['AP_interval_idx'], w=w,
+                                                                     interval=characteristics['fAHP_interval_idx'], w=w,
                                                                      k=characteristics['k_splines'],
                                                                      s=characteristics['s_splines'])
     if characteristics['fAHP_min_idx'] is None:
