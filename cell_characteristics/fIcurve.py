@@ -1,3 +1,4 @@
+from __future__ import division
 import numpy as np
 from analyze_APs import get_AP_onset_idxs
 

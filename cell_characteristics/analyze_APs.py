@@ -165,6 +165,8 @@ def get_AP_width_idxs(v, t, AP_onset, AP_max, AP_end, vrest):
     """
     halfmax = (v[AP_max] - vrest)/2
 
+    if AP_onset < 0:
+        AP_onset = 0
     start_idx = np.nonzero(np.diff(np.sign(v[AP_onset:AP_max]-vrest-halfmax)) == 2)[0]
     if len(start_idx) > 0:
         start_idx = start_idx[0] + AP_onset
@@ -322,8 +324,9 @@ def get_AP_start_end(v, threshold=-45, n=0):
     
     
 def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_interval=None,
-                              AP_width_before_onset=0, fAHP_interval=None, std_idx_times=(None, None), k_splines=None, s_splines=None,
-                              order_fAHP_min=None, DAP_interval=None, order_DAP_max=None, min_dist_to_DAP_max=None,
+                              AP_width_before_onset=0, fAHP_interval=None, std_idx_times=(None, None), k_splines=None,
+                              s_splines=None, order_fAHP_min=None, DAP_interval=None, order_DAP_max=None,
+                              min_dist_to_DAP_max=None, round_idxs=False,
                               check=False):
     """
     Computes the spike characteristics defined in return_characteristics.
@@ -333,7 +336,8 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     :param t: Time.
     :type t: np.array
     :param return_characteristics: Name of characteristics that shall be returned. Options: AP_amp, AP_width, AP_time,
-                                   fAHP_amp, DAP_amp, DAP_deflection, DAP_width, DAP_time, DAP_lin_slope, DAP_exp_slope.
+                                   fAHP_amp, fAHP_min_idx, DAP_amp, DAP_deflection, DAP_width, DAP_time, DAP_time_abs,
+                                   DAP_lin_slope, DAP_exp_slope.
     :type return_characteristics: list[str]
     :param v_rest: Resting potential.
     :type v_rest: float
@@ -369,18 +373,34 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     dt = t[1] - t[0]
 
     characteristics = {k: None for k in return_characteristics}
-    characteristics['v_rest'] = v_rest
-    characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
-    characteristics['AP_width_before_onset'] = to_idx(AP_width_before_onset, dt)
-    characteristics['fAHP_interval_idx'] = to_idx(fAHP_interval, dt) if not fAHP_interval is None else None
-    characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
-                                   for std_idx_time in std_idx_times]
-    characteristics['k_splines'] = k_splines if not k_splines is None else 3
-    characteristics['s_splines'] = s_splines
-    characteristics['order_fAHP_min_idx'] = to_idx(order_fAHP_min, dt) if not order_fAHP_min is None else 1
-    characteristics['DAP_interval_idx'] = to_idx(DAP_interval, dt) if not DAP_interval is None else None
-    characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
-    characteristics['min_dist_to_DAP_max'] = to_idx(min_dist_to_DAP_max, dt) if not min_dist_to_DAP_max is None else None
+
+    if round_idxs:
+        characteristics['v_rest'] = v_rest
+        characteristics['AP_interval_idx'] = int(round(AP_interval / dt)) if not AP_interval is None else None
+        characteristics['AP_width_before_onset_idx'] = int(round(AP_width_before_onset / dt))
+        characteristics['fAHP_interval_idx'] = int(round(fAHP_interval / dt)) if not fAHP_interval is None else None
+        characteristics['std_idxs'] = [int(round(std_idx_time / dt)) if not std_idx_time is None else None
+                                       for std_idx_time in std_idx_times]
+        characteristics['k_splines'] = k_splines if not k_splines is None else 3
+        characteristics['s_splines'] = s_splines
+        characteristics['order_fAHP_min_idx'] = int(round(order_fAHP_min / dt)) if not order_fAHP_min is None else 1
+        characteristics['DAP_interval_idx'] = int(round(DAP_interval / dt)) if not DAP_interval is None else None
+        characteristics['order_DAP_max_idx'] = int(round(order_DAP_max / dt)) if not order_DAP_max is None else 1
+        characteristics['min_dist_to_DAP_max'] = int(round(min_dist_to_DAP_max /
+                                                        dt)) if not min_dist_to_DAP_max is None else None
+    else:
+        characteristics['v_rest'] = v_rest
+        characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
+        characteristics['AP_width_before_onset_idx'] = to_idx(AP_width_before_onset, dt)
+        characteristics['fAHP_interval_idx'] = to_idx(fAHP_interval, dt) if not fAHP_interval is None else None
+        characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
+                                       for std_idx_time in std_idx_times]
+        characteristics['k_splines'] = k_splines if not k_splines is None else 3
+        characteristics['s_splines'] = s_splines
+        characteristics['order_fAHP_min_idx'] = to_idx(order_fAHP_min, dt) if not order_fAHP_min is None else 1
+        characteristics['DAP_interval_idx'] = to_idx(DAP_interval, dt) if not DAP_interval is None else None
+        characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
+        characteristics['min_dist_to_DAP_max'] = to_idx(min_dist_to_DAP_max, dt) if not min_dist_to_DAP_max is None else None
 
     AP_onset, AP_end = get_AP_start_end(v, AP_threshold)
     if AP_onset is None or AP_end is None:
@@ -394,11 +414,12 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
         return [characteristics[k] for k in return_characteristics]
 
     characteristics['AP_amp'] = get_AP_amp(v, characteristics['AP_max_idx'], characteristics['v_rest'])
-    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset - AP_width_before_onset,
+    characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset - characteristics['AP_width_before_onset_idx'],
                                                          characteristics['AP_max_idx'],
                                                          AP_onset + characteristics['AP_interval_idx'],
                                                          characteristics['v_rest'])
-    characteristics['AP_width'] = get_AP_width(v, t, AP_onset - AP_width_before_onset, characteristics['AP_max_idx'],
+    characteristics['AP_width'] = get_AP_width(v, t, AP_onset - characteristics['AP_width_before_onset_idx'],
+                                               characteristics['AP_max_idx'],
                                                AP_onset + characteristics['AP_interval_idx'],
                                                characteristics['v_rest'])
     characteristics['AP_time'] = t[characteristics['AP_max_idx']]
@@ -436,6 +457,8 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     characteristics['DAP_width'] = get_DAP_width(v, t, int(characteristics['fAHP_min_idx']),
                                                  int(characteristics['DAP_max_idx']), len(t), characteristics['v_rest'])
     characteristics['DAP_time'] = t[int(round(characteristics['DAP_max_idx']))] - t[characteristics['AP_max_idx']]
+    characteristics['DAP_time_abs'] = t[int(round(characteristics['DAP_max_idx']))]
+    characteristics['fAHP2DAP_time'] = t[int(round(characteristics['DAP_max_idx']))] - t[characteristics['fAHP_min_idx']]
 
     if characteristics['DAP_width_idx'] is None:
         if check:
@@ -495,13 +518,12 @@ def check_measures(v, t, characteristics):
         if not characteristics.get('DAP_max_idx') is None:
             pl.plot(t[int(characteristics['DAP_max_idx'])], v[int(characteristics['DAP_max_idx'])], 'ob',
                     label='DAP_max')
-        if not characteristics.get('AP_width_idxs')[0] is None and not characteristics.get('AP_width_idxs')[1] is None:
-            if not characteristics.get('DAP_width_idx') is None:
-                pl.plot([t[int(characteristics['fAHP_min_idx'])], t[int(characteristics['DAP_width_idx'])]],
-                        [v[int(characteristics['fAHP_min_idx'])]
-                         - (v[int(characteristics['fAHP_min_idx'])] - characteristics['v_rest']) / 2,
-                         v[int(characteristics['DAP_width_idx'])]],
-                        '-ob', label='DAP_width')
+        if not characteristics.get('DAP_width_idx') is None:
+            pl.plot([t[int(characteristics['fAHP_min_idx'])], t[int(characteristics['DAP_width_idx'])]],
+                    [v[int(characteristics['fAHP_min_idx'])]
+                     - (v[int(characteristics['fAHP_min_idx'])] - characteristics['v_rest']) / 2,
+                     v[int(characteristics['DAP_width_idx'])]],
+                    '-ob', label='DAP_width')
         if not characteristics.get('slope_start') is None and not characteristics.get('slope_end') is None:
             pl.plot([t[int(characteristics['slope_start'])], t[int(characteristics['slope_end'])]],
                     [v[int(characteristics['slope_start'])], v[int(characteristics['slope_end'])]],
