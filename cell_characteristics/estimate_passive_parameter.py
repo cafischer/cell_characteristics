@@ -4,6 +4,7 @@ from scipy.optimize import curve_fit
 from cell_characteristics import to_idx
 from scipy.signal import argrelmin
 from cell_fitting.read_heka import get_v_and_t_from_heka, get_i_inj_from_function, shift_v_rest
+pl.style.use('paper')
 
 
 def convert_unit_prefix(from_prefix, x):
@@ -82,7 +83,12 @@ def estimate_passive_parameter(v, t, i_inj):
 
     pl.figure()
     pl.plot(t, v, 'k')
-    pl.plot(t_expdecay+start_step*(t[1]-t[0]), exp_decay(t_expdecay, tau_m) + v[0], 'r')
+    pl.plot(t_expdecay+start_step*(t[1]-t[0]), exp_decay(t_expdecay, tau_m) + v[0], 'r', label='fitted exp. decay',
+            linewidth=1.5)
+    pl.legend()
+    pl.xlabel('Time (ms)')
+    pl.ylabel('Membrane Potential (mV)')
+    pl.tight_layout()
     pl.show()
 
     # compute Rin
