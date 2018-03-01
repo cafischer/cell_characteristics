@@ -34,7 +34,7 @@ def sort_eigvals_descending(eigvals, eigvecs):
     return eigvals, eigvecs
 
 
-def choose_eigvecs(n_eigvecs=3, least_expl_var=None):
+def choose_eigvecs(eigvecs, eigvals, n_eigvecs=3, least_expl_var=None):
     if least_expl_var is not None:
         n_eigvecs = np.where(np.cumsum(eigvals) / np.sum(eigvals) >= least_expl_var)[0][0] + 1
     chosen_eigvecs = eigvecs[:, :n_eigvecs]
@@ -48,6 +48,7 @@ def project_back(v_APs, chosen_eigvecs):
 
 
 def find_APs_in_v_trace(v, AP_threshold, before_AP_idx, after_AP_idx):
+    v_APs = []
     onset_idxs = get_AP_onset_idxs(v, AP_threshold)
     if len(onset_idxs) > 0:
         onset_idxs = np.insert(onset_idxs, len(onset_idxs), len(v))  # add end point to delimit for all APs start and end
@@ -150,7 +151,8 @@ def plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_i
     pl.savefig(os.path.join(save_dir_img, 'STC_eigenvals.png'))
 
 
-def plot_stc_all_in_one(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, ica_components, save_dir_img):
+def plot_all_in_one(v_APs, t_AP, back_projection, mean_high, std_high, mean_low, std_low, chosen_eigvecs, expl_var,
+                    ica_components, save_dir_img):
 
     APs_for_plots_idxs = np.random.randint(0, len(v_APs), max(len(v_APs), 100))
     v_APs_plots = v_APs[APs_for_plots_idxs]  # reduce to lower number
@@ -174,11 +176,23 @@ def plot_stc_all_in_one(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, 
     axes[0, 2].set_ylabel('Membrane Potential (mV)', fontsize=16)
     axes[0, 2].set_xlabel('Time (ms)', fontsize=16)
 
-    axes[1, 0].plot(np.arange(len(expl_var)), np.cumsum(expl_var), 'ok', markersize=8)
-    axes[1, 0].set_title('Explained Variance', fontsize=16)
-    axes[1, 0].set_ylabel('CDF', fontsize=16)
-    axes[1, 0].set_xlabel('#', fontsize=16)
-    axes[1, 0].set_ylim(0, 105)
+    # axes[1, 0].plot(np.arange(len(expl_var)), np.cumsum(expl_var), 'ok', markersize=5)
+    # axes[1, 0].set_title('Explained Variance', fontsize=16)
+    # axes[1, 0].set_ylabel('CDF', fontsize=16)
+    # axes[1, 0].set_xlabel('#', fontsize=16)
+    # axes[1, 0].set_ylim(0, 105)
+
+    axes[1, 0].set_title('Group by $AP_{max}$', fontsize=16)
+    axes[1, 0].fill_between(t_AP, mean_high + std_high, mean_high - std_high,
+                    facecolor='r', alpha=0.7)
+    axes[1, 0].fill_between(t_AP, mean_low + std_low, mean_low - std_low,
+                    facecolor='b', alpha=0.7)
+    axes[1, 0].plot(t_AP, mean_high, 'r', label='High $AP_{max}$')
+    axes[1, 0].plot(t_AP, mean_low, 'b', label='Low $AP_{max}$')
+    axes[1, 0].plot(t_AP, mean_high - mean_low, 'k', label='High - Low')
+    axes[1, 0].set_ylabel('Membrane Potential (mV)', fontsize=16)
+    axes[1, 0].set_xlabel('Time (ms)', fontsize=16)
+    axes[1, 0].legend(loc='lower right', fontsize=10)
 
     axes[1, 1].set_title('Eigenvectors', fontsize=16)
     ax2 = axes[1, 1].twinx()
@@ -321,7 +335,7 @@ if __name__ == '__main__':
         if len(v_APs) > 10:
             # STC
             eigvals, eigvecs, expl_var = get_stc(v_APs)
-            chosen_eigvecs = choose_eigvecs(n_eigvecs=3)
+            chosen_eigvecs = choose_eigvecs(eigvecs, eigvals, n_eigvecs=3)
             back_projection = project_back(v_APs, chosen_eigvecs)
             plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_img)
 
@@ -334,6 +348,7 @@ if __name__ == '__main__':
             ica_components = ica.fit_transform(v_APs.T)
             plot_ICA(v_APs, t_AP, ica_components, save_dir_img)
 
-            plot_stc_all_in_one(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, ica_components, save_dir_img)
+            plot_all_in_one(v_APs, t_AP, back_projection, mean_high, std_high, mean_low, std_low,
+                            chosen_eigvecs, expl_var, ica_components, save_dir_img)
 
         pl.close('all')
