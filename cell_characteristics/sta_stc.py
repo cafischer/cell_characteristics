@@ -1,6 +1,7 @@
 from __future__ import division
 import os
 import matplotlib.pyplot as pl
+from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from cell_fitting.data.plot_IV import check_v_at_i_inj_0_is_at_right_sweep_idx
 from cell_characteristics.analyze_APs import get_AP_onset_idxs, get_AP_max_idx
@@ -8,6 +9,9 @@ from cell_characteristics import to_idx
 from cell_fitting.read_heka import get_v_and_t_from_heka, get_i_inj_from_function
 from itertools import combinations
 from sklearn.decomposition import FastICA
+from sklearn.cluster import KMeans
+from sklearn import metrics
+import copy
 pl.style.use('paper')
 
 
@@ -153,6 +157,7 @@ def plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_i
 
 def plot_all_in_one(v_APs, t_AP, back_projection, mean_high, std_high, mean_low, std_low, chosen_eigvecs, expl_var,
                     ica_components, save_dir_img):
+    ica_components_copy = copy.copy(ica_components)
 
     APs_for_plots_idxs = np.random.randint(0, len(v_APs), max(len(v_APs), 100))
     v_APs_plots = v_APs[APs_for_plots_idxs]  # reduce to lower number
@@ -184,9 +189,9 @@ def plot_all_in_one(v_APs, t_AP, back_projection, mean_high, std_high, mean_low,
 
     axes[1, 0].set_title('Group by $AP_{max}$', fontsize=16)
     axes[1, 0].fill_between(t_AP, mean_high + std_high, mean_high - std_high,
-                    facecolor='r', alpha=0.7)
+                    facecolor='r', alpha=0.3)
     axes[1, 0].fill_between(t_AP, mean_low + std_low, mean_low - std_low,
-                    facecolor='b', alpha=0.7)
+                    facecolor='b', alpha=0.3)
     axes[1, 0].plot(t_AP, mean_high, 'r', label='High $AP_{max}$')
     axes[1, 0].plot(t_AP, mean_low, 'b', label='Low $AP_{max}$')
     axes[1, 0].plot(t_AP, mean_high - mean_low, 'k', label='High - Low')
@@ -214,7 +219,7 @@ def plot_all_in_one(v_APs, t_AP, back_projection, mean_high, std_high, mean_low,
     ax2.plot(t_AP, np.mean(v_APs, 0), 'k')
     ax2.set_ylabel('Membrane Potential (mV)', fontsize=16)
     ax2.spines['right'].set_visible(True)
-    for i, vec in enumerate(ica_components.T):
+    for i, vec in enumerate(ica_components_copy.T):
         if vec[0] < 0:
             vec *= -1
         axes[1, 2].plot(t_AP, vec, label='%i' % i)
@@ -245,23 +250,23 @@ def group_by_AP_max(v_APs):
     AP_max = np.array([vec[0] for vec in v_APs])
     AP_max_sort_idxs = np.argsort(AP_max)
     AP_max_sort = AP_max[AP_max_sort_idxs]
-    AP_max_high = AP_max >= AP_max_sort[int(round(len(AP_max_sort) * (1. / 2.)))]
-    AP_max_low = AP_max < AP_max_sort[int(round(len(AP_max_sort) * (1. / 2.)))]
-    mean_high = np.mean(v_APs[AP_max_high], 0)
-    std_high = np.std(v_APs[AP_max_high], 0)
-    mean_low = np.mean(v_APs[AP_max_low], 0)
-    std_low = np.std(v_APs[AP_max_low], 0)
-    return mean_high, std_high, mean_low, std_low
+    AP_max_high_labels = AP_max >= AP_max_sort[int(round(len(AP_max_sort) * (1. / 2.)))]
+    mean_high = np.mean(v_APs[AP_max_high_labels], 0)
+    std_high = np.std(v_APs[AP_max_high_labels], 0)
+    mean_low = np.mean(v_APs[~AP_max_high_labels], 0)
+    std_low = np.std(v_APs[~AP_max_high_labels], 0)
+    return mean_high, std_high, mean_low, std_low, AP_max_high_labels
 
 
 def plot_ICA(v_APs, t_AP, ica_components, save_dir_img):
+    ica_components_copy = copy.copy(ica_components)
     fig, ax = pl.subplots()
     ax.set_title('ICA Components', fontsize=18)
     ax2 = ax.twinx()
     ax2.plot(t_AP, np.mean(v_APs, 0), 'k')
     ax2.set_ylabel('Membrane Potential (mV)')
     ax2.spines['right'].set_visible(True)
-    for vec in ica_components.T:
+    for vec in ica_components_copy.T:
         if vec[0] < 0:
             vec *= -1
         ax.plot(t_AP, vec)
@@ -270,6 +275,156 @@ def plot_ICA(v_APs, t_AP, ica_components, save_dir_img):
     ax.legend(loc='lower right', fontsize=10)
     pl.tight_layout()
     pl.savefig(os.path.join(save_dir_img, 'ICA_components.png'))
+
+
+def plot_PCA_3D(v_APs_centered, chosen_eigvecs, AP_max_high_labels=None, save_dir_img=None):
+    if np.shape(chosen_eigvecs)[1] > 3:
+        raise Warning('More than 3 eigenvectors chosen!')
+        chosen_eigvecs = chosen_eigvecs[:4]
+
+    v_APs_projected = np.dot(v_APs_centered, chosen_eigvecs)
+
+    fig = pl.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    for (x, y, z) in v_APs_projected:
+        ax.scatter(x, y, z, color='k')
+    ax.set_xlabel('Eigenvector 1', fontsize=16)
+    ax.set_ylabel('Eigenvector 2', fontsize=16)
+    ax.set_zlabel('Eigenvector 3', fontsize=16)
+    ax.view_init(45, -45)
+    pl.savefig(os.path.join(save_dir_img, 'PC_projection.png'))
+
+    if AP_max_high_labels is not None:
+        silhouette_score = metrics.silhouette_score(v_APs_projected, AP_max_high_labels, metric='euclidean')
+
+        fig = pl.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.set_title('Silhouette Score: %.2f' % silhouette_score)
+        v_APs_projected = np.dot(v_APs_centered, chosen_eigvecs)
+        for i, (x, y, z) in enumerate(v_APs_projected[AP_max_high_labels]):
+            ax.scatter(x, y, z, color='r', label='$high\ AP_{max}$' if i == 0 else '')
+        for i, (x, y, z) in enumerate(v_APs_projected[~AP_max_high_labels]):
+            ax.scatter(x, y, z, color='b', label='$low\ AP_{max}$' if i == 0 else '')
+        ax.set_xlabel('Eigenvector 1', fontsize=16)
+        ax.set_ylabel('Eigenvector 2', fontsize=16)
+        ax.set_zlabel('Eigenvector 3', fontsize=16)
+        ax.view_init(45, -45)
+        pl.legend(fontsize=14)
+        pl.savefig(os.path.join(save_dir_img, 'PC_projection_with_AP_max.png'))
+
+
+def plot_ICA_3D(v_APs_centered, ica_source, AP_max_high_labels=None, save_dir_img=None):
+    if np.shape(ica_source)[1] > 3:
+        raise Warning('More than 3 components chosen!')
+        ica_source = ica_source[:4]
+
+    fig = pl.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    for (x, y, z) in ica_source:
+        ax.scatter(x, y, z, color='k')
+    ax.set_xlabel('Component 1', fontsize=16)
+    ax.set_ylabel('Component 2', fontsize=16)
+    ax.set_zlabel('Component 3', fontsize=16)
+    ax.view_init(45, -45)
+    pl.savefig(os.path.join(save_dir_img, 'ICA_projection.png'))
+
+    if AP_max_high_labels is not None:
+        fig = pl.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        for i, (x, y, z) in enumerate(ica_source[AP_max_high_labels]):
+            ax.scatter(x, y, z, color='r', label='$high\ AP_{max}$' if i == 0 else '')
+        for i, (x, y, z) in enumerate(ica_source[~AP_max_high_labels]):
+            ax.scatter(x, y, z, color='b', label='$low\ AP_{max}$' if i == 0 else '')
+        ax.set_xlabel('Component 1', fontsize=16)
+        ax.set_ylabel('Component 2', fontsize=16)
+        ax.set_zlabel('Component 3', fontsize=16)
+        ax.view_init(45, -45)
+        pl.legend(fontsize=14)
+        pl.savefig(os.path.join(save_dir_img, 'ICA_projection_with_AP_max.png'))
+
+
+def plot_clustering_kmeans(v_APs_centered, chosen_eigvecs, n_clusters=2, save_dir_img=None):
+    kmeans = KMeans(n_clusters=n_clusters)
+    v_APs_projected = np.dot(v_APs_centered, chosen_eigvecs)
+    kmeans.fit(v_APs_projected)
+    labels = kmeans.labels_
+    silhouette_score_val = metrics.silhouette_score(v_APs_projected, labels, metric='euclidean')
+
+    colors = pl.get_cmap('plasma')([float(i) / n_clusters for i in range(n_clusters)])
+    fig = pl.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.set_title('Silhouette Score: %.2f' % silhouette_score_val)
+    for i, (x, y, z) in enumerate(v_APs_projected):
+        ax.scatter(x, y, z, color=colors[labels[i]])
+    ax.set_xlabel('Eigenvector 1', fontsize=16)
+    ax.set_ylabel('Eigenvector 2', fontsize=16)
+    ax.set_zlabel('Eigenvector 3', fontsize=16)
+    ax.view_init(45, -45)
+    pl.savefig(os.path.join(save_dir_img, 'PC_projection_clustered.png'))
+
+
+def plot_backtransform(v_APs_centered, t_AP, mean_high_centered, mean_low_centered, std_high, std_low, chosen_eigvecs,
+                       ica_source, ica_mixing, save_dir_img):
+    fig, axes = pl.subplots(3, 3, figsize=(14, 7), sharey='all', sharex='all')
+    axes[0, 0].set_title('Centered APs')
+    for vec in v_APs_centered:
+        axes[0, 0].plot(t_AP, vec)
+    ylim_min, ylim_max = axes[0, 0].get_ylim()
+    ylim_max -= 1
+    ylim_min += 1
+
+    axes[1, 0].set_title('PCA: back-transform')
+    for vec in np.dot(v_APs_centered, np.dot(chosen_eigvecs, chosen_eigvecs.T)):
+        axes[1, 0].plot(t_AP, vec)
+
+    axes[2, 0].set_title('ICA: back-transform')
+    for vec in np.dot(ica_source, ica_mixing.T):
+        axes[2, 0].plot(t_AP, vec)
+
+    axes[0, 1].set_title('Error Centered APs')
+    for vec in v_APs_centered - v_APs_centered:
+        axes[0, 1].plot(t_AP, vec)
+
+    axes[1, 1].set_title('Error PCA: back-transform')
+    for vec in v_APs_centered - np.dot(v_APs_centered, np.dot(chosen_eigvecs, chosen_eigvecs.T)):
+        axes[1, 1].plot(t_AP, vec)
+
+    axes[2, 1].set_title('Error ICA: back-transform')
+    for vec in v_APs_centered - np.dot(ica_source, ica_mixing.T):
+        axes[2, 1].plot(t_AP, vec)
+
+    # TODO: group by AP max
+    axes[0, 2].set_title('Group by $AP_{max}$')
+    axes[0, 2].fill_between(t_AP, mean_high_centered + std_high, mean_high_centered - std_high,
+                    facecolor='r', alpha=0.3)
+    axes[0, 2].fill_between(t_AP, mean_low_centered + std_low, mean_low_centered - std_low,
+                    facecolor='b', alpha=0.3)
+    axes[0, 2].plot(t_AP, mean_high_centered, 'r', label='High $AP_{max}$')
+    axes[0, 2].plot(t_AP, mean_low_centered, 'b', label='Low $AP_{max}$')
+    diff = mean_high_centered - mean_low_centered
+    diff = (diff - np.min(diff)) / (np.max(diff) - np.min(diff))
+    diff = diff * (ylim_max - ylim_min) + ylim_min
+    axes[0, 2].plot(t_AP, diff, 'k', label='High - Low')
+    axes[0, 2].legend(loc='lower right', fontsize=10)
+
+    axes[1, 2].set_title('PCA: eigenvectors')
+    for vec in chosen_eigvecs.T:
+        if vec[0] < 0:
+            vec = vec*-1
+        vec = (vec - np.min(vec)) / (np.max(vec) - np.min(vec))
+        vec = vec * (ylim_max - ylim_min) + ylim_min
+        axes[1, 2].plot(t_AP, vec)
+
+    axes[2, 2].set_title('ICA: mixing matrix')
+    for vec in ica_mixing.T:
+        if vec[0] < 0:
+            vec = vec * -1
+        vec = (vec - np.min(vec)) / (np.max(vec) - np.min(vec))
+        vec = vec * (ylim_max - ylim_min) + ylim_min
+        axes[2, 2].plot(t_AP, vec)
+
+    pl.tight_layout()
+    pl.savefig(os.path.join(save_dir_img, 'backtransform.png'))
 
 
 if __name__ == '__main__':
@@ -329,6 +484,7 @@ if __name__ == '__main__':
         for v in v_mat:
             v_APs.extend(find_APs_in_v_trace(v, AP_threshold, before_AP_idx_STC, after_AP_idx_STC))
         v_APs = np.vstack(v_APs)
+        v_APs_centered = v_APs - np.mean(v_APs, 0)
         t_AP = np.arange(after_AP_idx_STC + before_AP_idx_STC + 1) * dt
         v_APs = v_APs[np.random.randint(0, len(v_APs), 100)]  # TODO
 
@@ -340,15 +496,15 @@ if __name__ == '__main__':
             plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_img)
 
             # Group by AP_max
-            mean_high, std_high, mean_low, std_low = group_by_AP_max(v_APs)
+            mean_high, std_high, mean_low, std_low, _, _ = group_by_AP_max(v_APs)
             plot_group_by_AP_max(mean_high, std_high, mean_low, std_low, t_AP, save_dir_img)
 
             # ICA
-            ica = FastICA(n_components=3)
-            ica_components = ica.fit_transform(v_APs.T)
-            plot_ICA(v_APs, t_AP, ica_components, save_dir_img)
+            ica = FastICA(n_components=3, whiten=True)
+            ica_source = ica.fit_transform(v_APs_centered)
+            plot_ICA(v_APs, t_AP, ica.mixing_, save_dir_img)
 
             plot_all_in_one(v_APs, t_AP, back_projection, mean_high, std_high, mean_low, std_low,
-                            chosen_eigvecs, expl_var, ica_components, save_dir_img)
+                            chosen_eigvecs, expl_var, ica.mixing_, save_dir_img)
 
         pl.close('all')
