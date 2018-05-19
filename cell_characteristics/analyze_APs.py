@@ -21,7 +21,7 @@ def get_AP_onset_idxs(v, threshold=-30):
     return np.nonzero(np.diff(np.sign(v-threshold)) == 2)[0]
 
 
-def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None, add_noise=True):
+def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None, v_diff_onset_max=None, add_noise=False):
     """
     Returns the index of the local maximum of the AP between AP onset and end during dur.
     :param AP_onset: Index where the membrane potential crosses the AP threshold.
@@ -43,6 +43,9 @@ def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None, add_noise=True):
         maxima = argrelmax(v[AP_onset:AP_end], order=order)[0]
     if interval is not None:
         maxima = maxima[maxima < interval]
+
+    if v_diff_onset_max is not None:
+        maxima = maxima[(v[AP_onset + maxima] - v[AP_onset]) > v_diff_onset_max]
 
     if np.size(maxima) == 0:
         return None
@@ -323,9 +326,9 @@ def get_AP_start_end(v, threshold=-45, n=0):
         return AP_onset, AP_end
     
     
-def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_interval=None,
-                              AP_width_before_onset=0, fAHP_interval=None, std_idx_times=(None, None), k_splines=None,
-                              s_splines=None, order_fAHP_min=None, DAP_interval=None, order_DAP_max=None,
+def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_max_idx=None, AP_onset=None,
+                              AP_interval=None, AP_width_before_onset=0, fAHP_interval=None, std_idx_times=(None, None),
+                              k_splines=None, s_splines=None, order_fAHP_min=None, DAP_interval=None, order_DAP_max=None,
                               min_dist_to_DAP_max=None, round_idxs=False,
                               check=False):
     """
@@ -339,6 +342,10 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
                                    fAHP_amp, fAHP_min_idx, DAP_amp, DAP_deflection, DAP_width, DAP_time, DAP_time_abs,
                                    DAP_lin_slope, DAP_exp_slope.
     :type return_characteristics: list[str]
+    :param AP_threshold: Threshold for detecting APs.
+    :param AP_max_idx: Can be used instead of AP threshold to give the location of the AP directly. If used also need
+                       to define AP_onset.
+    :param: AP_onset: Just define of AP_max_idx is used otherwise it will be inferred using AP_threshold.
     :param v_rest: Resting potential.
     :type v_rest: float
     :param AP_interval: Maximal time (ms) between crossing AP threshold and AP peak.
@@ -402,16 +409,18 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
         characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
         characteristics['min_dist_to_DAP_max'] = to_idx(min_dist_to_DAP_max, dt) if not min_dist_to_DAP_max is None else None
 
-    AP_onset, AP_end = get_AP_start_end(v, AP_threshold)
-    if AP_onset is None or AP_end is None:
-        print 'No AP found!'
-        return [characteristics[k] for k in return_characteristics]
-
-    characteristics['AP_max_idx'] = get_AP_max_idx(v, AP_onset, AP_end, interval=characteristics['AP_interval_idx'])
-    if characteristics['AP_max_idx'] is None:
-        if check:
-            check_measures(v, t, characteristics)
-        return [characteristics[k] for k in return_characteristics]
+    if AP_max_idx is None:
+        AP_onset, AP_end = get_AP_start_end(v, AP_threshold)
+        if AP_onset is None or AP_end is None:
+            print 'No AP found!'
+            return [characteristics[k] for k in return_characteristics]
+        characteristics['AP_max_idx'] = get_AP_max_idx(v, AP_onset, AP_end, interval=characteristics['AP_interval_idx'])
+        if characteristics['AP_max_idx'] is None:
+            if check:
+                check_measures(v, t, characteristics)
+            return [characteristics[k] for k in return_characteristics]
+    else:
+        characteristics['AP_max_idx'] = AP_max_idx
 
     characteristics['AP_amp'] = get_AP_amp(v, characteristics['AP_max_idx'], characteristics['v_rest'])
     characteristics['AP_width_idxs'] = get_AP_width_idxs(v, t, AP_onset - characteristics['AP_width_before_onset_idx'],

@@ -123,7 +123,7 @@ def estimate_passive_parameter(v, t, i_inj):
 
 
 if __name__ == '__main__':
-    data_dir = '/home/cf/Phd/DAP-Project/cell_data/raw_data/2015_08_26b.dat'
+    data_dir = '/home/cf/Phd/DAP-Project/cell_data/raw_data/2015_08_20e.dat'
     protocol = 'hypTester'
     v_mat, t_mat, sweep_idxs = get_v_and_t_from_heka(data_dir, protocol, group='Group1', trace='Trace1',
                                                      sweep_idxs=None, return_sweep_idxs=True)

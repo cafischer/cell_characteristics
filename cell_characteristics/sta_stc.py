@@ -4,7 +4,8 @@ import matplotlib.pyplot as pl
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 from cell_fitting.data.plot_IV import check_v_at_i_inj_0_is_at_right_sweep_idx
-from cell_characteristics.analyze_APs import get_AP_onset_idxs, get_AP_max_idx
+from cell_characteristics.analyze_APs import get_AP_onset_idxs, get_AP_max_idx, \
+    get_fAHP_min_idx_using_splines, get_DAP_max_idx_using_splines, get_DAP_amp, get_DAP_deflection
 from cell_characteristics import to_idx
 from cell_fitting.read_heka import get_v_and_t_from_heka, get_i_inj_from_function
 from itertools import combinations
@@ -12,6 +13,10 @@ from sklearn.decomposition import FastICA
 from sklearn.cluster import KMeans
 from sklearn import metrics
 import copy
+from cell_fitting.util import init_nan
+from sklearn import linear_model
+import scipy.stats
+from statsmodels.robust import mad
 pl.style.use('paper')
 
 
@@ -19,6 +24,12 @@ def get_sta(v_APs):
     sta = np.mean(v_APs, 0)
     sta_std = np.std(v_APs, 0)
     return sta, sta_std
+
+
+def get_sta_median(v_APs):
+    sta = np.median(v_APs, 0)
+    sta_mad = mad(v_APs, axis=0)
+    return sta, sta_mad
 
 
 def get_stc(v_APs):
@@ -74,9 +85,21 @@ def find_APs_in_v_trace(v, AP_threshold, before_AP_idx, after_AP_idx):
     return v_APs
 
 
-def plots_sta(v_APs, t_AP, sta, sta_std, save_dir_img):
+def plot_sta(t_AP, sta, sta_std, save_dir_img):
+    pl.figure()
+    #pl.title('STA', fontsize=18)
+    pl.plot(t_AP, sta, 'k')
+    pl.fill_between(t_AP, sta + sta_std, sta - sta_std,
+                    facecolor='k', alpha=0.5)
+    pl.xlabel('Time (ms)')
+    pl.ylabel('Membrane Potential (mV)')
+    pl.tight_layout()
+    pl.savefig(save_dir_img)
+    
+    
+def plot_APs(v_APs, t_AP, save_dir_img):    
     v_APs_plots = v_APs[np.random.randint(0, len(v_APs), 50)]  # reduce to lower number
-
+    
     pl.figure()
     pl.title('AP Traces (# %i)' % len(v_APs), fontsize=18)
     for v_AP in v_APs_plots:
@@ -84,17 +107,7 @@ def plots_sta(v_APs, t_AP, sta, sta_std, save_dir_img):
     pl.ylabel('Membrane potential (mV)')
     pl.xlabel('Time (ms)')
     pl.tight_layout()
-    pl.savefig(os.path.join(save_dir_img, 'STA_APs.png'))
-
-    pl.figure()
-    pl.title('STA', fontsize=18)
-    pl.plot(t_AP, sta, 'k')
-    pl.fill_between(t_AP, sta + sta_std, sta - sta_std,
-                    facecolor='k', alpha=0.5)
-    pl.xlabel('Time (ms)')
-    pl.ylabel('Membrane Potential (mV)')
-    pl.tight_layout()
-    pl.savefig(os.path.join(save_dir_img, 'STA.png'))
+    pl.savefig(save_dir_img)
 
 
 def plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_img):
@@ -147,11 +160,11 @@ def plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_i
 
     pl.figure()
     pl.title('Cumulative Explained Variance', fontsize=18)
-    pl.plot(np.arange(len(expl_var)), np.cumsum(expl_var), 'ok', markersize=8)
+    pl.plot(np.arange(len(expl_var)), np.cumsum(expl_var), 'ok', markersize=6)
     pl.ylabel('Percent')
     pl.xlabel('#')
     pl.ylim(0, 105)
-    pl.tight_layout()                           
+    pl.tight_layout()
     pl.savefig(os.path.join(save_dir_img, 'STC_eigenvals.png'))
 
 
@@ -255,7 +268,7 @@ def group_by_AP_max(v_APs):
     std_high = np.std(v_APs[AP_max_high_labels], 0)
     mean_low = np.mean(v_APs[~AP_max_high_labels], 0)
     std_low = np.std(v_APs[~AP_max_high_labels], 0)
-    return mean_high, std_high, mean_low, std_low, AP_max_high_labels
+    return mean_high, std_high, mean_low, std_low, AP_max_high_labels, AP_max
 
 
 def plot_ICA(v_APs, t_AP, ica_components, save_dir_img):
@@ -277,7 +290,8 @@ def plot_ICA(v_APs, t_AP, ica_components, save_dir_img):
     pl.savefig(os.path.join(save_dir_img, 'ICA_components.png'))
 
 
-def plot_PCA_3D(v_APs_centered, chosen_eigvecs, AP_max_high_labels=None, save_dir_img=None):
+def plot_PCA_3D(v_APs_centered, chosen_eigvecs, AP_max_high_labels=None, AP_max=None, DAP_maxs=None,
+                DAP_deflections=None, save_dir_img=None):
     if np.shape(chosen_eigvecs)[1] > 3:
         raise Warning('More than 3 eigenvectors chosen!')
         chosen_eigvecs = chosen_eigvecs[:4]
@@ -292,6 +306,7 @@ def plot_PCA_3D(v_APs_centered, chosen_eigvecs, AP_max_high_labels=None, save_di
     ax.set_ylabel('Eigenvector 2', fontsize=16)
     ax.set_zlabel('Eigenvector 3', fontsize=16)
     ax.view_init(45, -45)
+    pl.tight_layout()
     pl.savefig(os.path.join(save_dir_img, 'PC_projection.png'))
 
     if AP_max_high_labels is not None:
@@ -300,7 +315,6 @@ def plot_PCA_3D(v_APs_centered, chosen_eigvecs, AP_max_high_labels=None, save_di
         fig = pl.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.set_title('Silhouette Score: %.2f' % silhouette_score)
-        v_APs_projected = np.dot(v_APs_centered, chosen_eigvecs)
         for i, (x, y, z) in enumerate(v_APs_projected[AP_max_high_labels]):
             ax.scatter(x, y, z, color='r', label='$high\ AP_{max}$' if i == 0 else '')
         for i, (x, y, z) in enumerate(v_APs_projected[~AP_max_high_labels]):
@@ -310,7 +324,157 @@ def plot_PCA_3D(v_APs_centered, chosen_eigvecs, AP_max_high_labels=None, save_di
         ax.set_zlabel('Eigenvector 3', fontsize=16)
         ax.view_init(45, -45)
         pl.legend(fontsize=14)
+        pl.tight_layout()
+        pl.savefig(os.path.join(save_dir_img, 'PC_projection_with_AP_max_groups.png'))
+
+    if AP_max is not None:
+        cmap = pl.get_cmap('viridis')
+        AP_max_normed = (AP_max - np.min(AP_max)) / np.max(AP_max - np.min(AP_max))
+        fig = pl.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        for i, (x, y, z) in enumerate(v_APs_projected):
+            scat = ax.scatter(x, y, z, color=cmap(AP_max_normed[i]))
+        ax.set_xlabel('Eigenvector 1', fontsize=16)
+        ax.set_ylabel('Eigenvector 2', fontsize=16)
+        ax.set_zlabel('Eigenvector 3', fontsize=16)
+        ax.view_init(45, -45)
+        scat.set_array(AP_max_normed)
+        scat.set_clim(0, 1)
+        cbar = fig.colorbar(mappable=scat, ax=ax)
+        cbar.set_ticks(np.linspace(0, 1, 5))
+        cbar.set_ticklabels(['%.1f' % tick for tick in np.linspace(np.min(AP_max), np.max(AP_max), 5)], True)
+        cbar.set_label('$AP_{max}$')
+        pl.tight_layout()
         pl.savefig(os.path.join(save_dir_img, 'PC_projection_with_AP_max.png'))
+
+    if DAP_deflections is not None:
+        cmap = pl.get_cmap('viridis')
+        DAP_deflections_normed = (DAP_deflections - np.nanmin(DAP_deflections)) \
+                                 / np.nanmax(DAP_deflections - np.nanmin(DAP_deflections))
+        fig = pl.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        for i, (x, y, z) in enumerate(v_APs_projected):
+            if np.isnan(DAP_deflections_normed[i]):
+                color = '0.5'
+            else:
+                color = cmap(DAP_deflections_normed[i])
+            scat = ax.scatter(x, y, z, color=color)
+        ax.set_xlabel('Eigenvector 1', fontsize=16)
+        ax.set_ylabel('Eigenvector 2', fontsize=16)
+        ax.set_zlabel('Eigenvector 3', fontsize=16)
+        ax.view_init(45, -45)
+        scat.set_array(DAP_deflections_normed)
+        scat.set_clim(0, 1)
+        cbar = fig.colorbar(mappable=scat, ax=ax)
+        cbar.set_ticks(np.linspace(0, 1, 5))
+        cbar.set_ticklabels(['%.1f' % tick
+                             for tick in np.linspace(np.nanmin(DAP_deflections), np.nanmax(DAP_deflections), 5)], True)
+        cbar.set_label('$DAP_{deflection}$')
+        pl.tight_layout()
+        pl.savefig(os.path.join(save_dir_img, 'PC_projection_with_DAP_deflections.png'))
+
+    if DAP_maxs is not None:
+        cmap = pl.get_cmap('viridis_r')
+        DAP_maxs_normed = ((DAP_maxs - np.nanmin(DAP_maxs)) / np.nanmax(DAP_maxs - np.nanmin(DAP_maxs)))
+        fig = pl.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        for i, (x, y, z) in enumerate(v_APs_projected):
+            if np.isnan(DAP_maxs_normed[i]):
+                color = '0.5'
+            else:
+                color = cmap(DAP_maxs_normed[i])
+            scat = ax.scatter(x, y, z, color=color)
+        ax.set_xlabel('Eigenvector 1', fontsize=16)
+        ax.set_ylabel('Eigenvector 2', fontsize=16)
+        ax.set_zlabel('Eigenvector 3', fontsize=16)
+        ax.view_init(45, -45)
+        scat.set_array(DAP_maxs_normed)
+        scat.set_clim(0, 1)
+        cbar = fig.colorbar(mappable=scat, ax=ax)
+        cbar.set_ticks(np.linspace(0, 1, 5))
+        cbar.set_ticklabels(['%.1f' % tick for tick in np.linspace(np.nanmin(DAP_maxs), np.nanmax(DAP_maxs), 5)][::-1], True)
+        cbar.set_label('$DAP_{max}$')
+        pl.tight_layout()
+        pl.savefig(os.path.join(save_dir_img, 'PC_projection_with_DAP_max.png'))
+
+
+def detect_outliers(ys, threshold=3):
+    mean_y = np.nanmean(ys)
+    stdev_y = np.nanstd(ys)
+    z_scores = [(y - mean_y) / stdev_y for y in ys]
+    return np.abs(z_scores) > threshold
+
+
+def plot_corr_PCA_characteristics(v_APs_centered, chosen_eigvecs, AP_max=None, DAP_maxs=None,
+                DAP_deflections=None, outlier_threshold=3.0, save_dir_img=None):
+    if np.shape(chosen_eigvecs)[1] > 3:
+        raise Warning('More than 3 eigenvectors chosen!')
+        chosen_eigvecs = chosen_eigvecs[:4]
+
+    v_APs_projected = np.dot(v_APs_centered, chosen_eigvecs)
+
+    for eigvec_idx in range(3):
+        if AP_max is not None:
+            regr = linear_model.LinearRegression()
+            regr.fit(np.array([v_APs_projected[:, eigvec_idx]]).T, AP_max)
+            corr, p_val = scipy.stats.pearsonr(v_APs_projected[:, eigvec_idx], AP_max)
+            pl.figure()
+            pl.title('Corr.: %.2f, p-val.: %.3f' % (corr, p_val))
+            pl.plot(v_APs_projected[:, eigvec_idx], AP_max, 'ok')
+            pl.plot(v_APs_projected[:, eigvec_idx], regr.coef_[0] * v_APs_projected[:, eigvec_idx] + regr.intercept_, '0.5')
+            pl.xlabel('Eigenvektor '+str(eigvec_idx+1))
+            pl.ylabel('$AP_{max}$')
+            pl.tight_layout()
+            pl.savefig(os.path.join(save_dir_img, 'Corr_eigvec'+str(eigvec_idx+1)+'_AP_max.png'))
+
+        if DAP_deflections is not None:
+            #pl.close('all')
+            not_nan = ~np.isnan(DAP_deflections)
+            outliers = detect_outliers(DAP_deflections, outlier_threshold)
+            regr = linear_model.LinearRegression()
+            regr.fit(np.array([v_APs_projected[:, eigvec_idx][np.logical_and(not_nan, ~outliers)]]).T,
+                     DAP_deflections[np.logical_and(not_nan, ~outliers)])
+            corr, p_val = scipy.stats.pearsonr(v_APs_projected[:, eigvec_idx][np.logical_and(not_nan, ~outliers)],
+                                               DAP_deflections[np.logical_and(not_nan, ~outliers)])
+            pl.figure()
+            pl.title('Corr.: %.2f, p-val.: %.3f' % (corr, p_val))
+            pl.plot(v_APs_projected[:, eigvec_idx][np.logical_and(not_nan, ~outliers)], DAP_deflections[np.logical_and(not_nan, ~outliers)], 'ok')
+            pl.plot(v_APs_projected[:, eigvec_idx][np.logical_and(not_nan, ~outliers)],
+                    regr.coef_[0] * v_APs_projected[:, eigvec_idx][np.logical_and(not_nan, ~outliers)] + regr.intercept_, '0.5')
+            #pl.plot(v_APs_projected[:, eigvec_idx][outliers], DAP_deflections[outliers], 'or')
+            pl.xlabel('Eigenvektor '+str(eigvec_idx+1))
+            pl.ylabel('$DAP_{deflection}$')
+            pl.tight_layout()
+            pl.savefig(os.path.join(save_dir_img, 'Corr_eigvec'+str(eigvec_idx+1)+'_DAP_deflection_without_outliers.png'))
+            #pl.show()
+
+        if DAP_maxs is not None:
+            not_nan = ~np.isnan(DAP_deflections)
+            regr = linear_model.LinearRegression()
+            regr.fit(np.array([v_APs_projected[:, eigvec_idx][not_nan]]).T, DAP_maxs[not_nan])
+            corr, p_val = scipy.stats.pearsonr(v_APs_projected[:, eigvec_idx][not_nan], DAP_maxs[not_nan])
+            pl.figure()
+            pl.title('Corr.: %.2f, p-val.: %.3f' % (corr, p_val))
+            pl.plot(v_APs_projected[:, eigvec_idx], DAP_maxs, 'ok')
+            pl.plot(v_APs_projected[:, eigvec_idx], regr.coef_[0] * v_APs_projected[:, eigvec_idx] + regr.intercept_, '0.5')
+            pl.xlabel('Eigenvektor '+str(eigvec_idx+1))
+            pl.ylabel('$DAP_{max}$')
+            pl.tight_layout()
+            pl.savefig(os.path.join(save_dir_img, 'Corr_eigvec'+str(eigvec_idx+1)+'_DAP_max.png'))
+
+            # AP max vs DAP max
+            not_nan = ~np.isnan(DAP_deflections)
+            regr = linear_model.LinearRegression()
+            regr.fit(np.array([AP_max[not_nan]]).T, DAP_maxs[not_nan])
+            corr, p_val = scipy.stats.pearsonr(AP_max[not_nan], DAP_maxs[not_nan])
+            pl.figure()
+            pl.title('Corr.: %.2f, p-val.: %.3f' % (corr, p_val))
+            pl.plot(AP_max, DAP_maxs, 'ok')
+            pl.plot(AP_max, regr.coef_[0] * AP_max + regr.intercept_, '0.5')
+            pl.xlabel('$AP_{max}$')
+            pl.ylabel('$DAP_{max}$')
+            pl.tight_layout()
+            pl.savefig(os.path.join(save_dir_img, 'Corr_AP_max_DAP_max.png'))
 
 
 def plot_ICA_3D(v_APs_centered, ica_source, AP_max_high_labels=None, save_dir_img=None):
@@ -343,7 +507,7 @@ def plot_ICA_3D(v_APs_centered, ica_source, AP_max_high_labels=None, save_dir_im
         pl.savefig(os.path.join(save_dir_img, 'ICA_projection_with_AP_max.png'))
 
 
-def plot_clustering_kmeans(v_APs_centered, chosen_eigvecs, n_clusters=2, save_dir_img=None):
+def plot_clustering_kmeans(v_APs, v_APs_centered, t_AP, chosen_eigvecs, n_clusters=2, save_dir_img=None):
     kmeans = KMeans(n_clusters=n_clusters)
     v_APs_projected = np.dot(v_APs_centered, chosen_eigvecs)
     kmeans.fit(v_APs_projected)
@@ -362,9 +526,19 @@ def plot_clustering_kmeans(v_APs_centered, chosen_eigvecs, n_clusters=2, save_di
     ax.view_init(45, -45)
     pl.savefig(os.path.join(save_dir_img, 'PC_projection_clustered.png'))
 
+    pl.figure()
+    pl.title('APs clustered in 2 groups')
+    for label in np.unique(labels):
+        for vec in v_APs[labels==label]:
+            pl.plot(t_AP, vec, color=colors[label])
+    pl.ylabel('Membrane Potential (mV)')
+    pl.xlabel('Time (ms)')
+    pl.tight_layout()
+    pl.savefig(os.path.join(save_dir_img, 'v_APs_clustered.png'))
+
 
 def plot_backtransform(v_APs_centered, t_AP, mean_high_centered, mean_low_centered, std_high, std_low, chosen_eigvecs,
-                       ica_source, ica_mixing, save_dir_img):
+                       expl_var, ica_source, ica_mixing, save_dir_img):
     fig, axes = pl.subplots(3, 3, figsize=(14, 7), sharey='all', sharex='all')
     axes[0, 0].set_title('Centered APs')
     for vec in v_APs_centered:
@@ -395,6 +569,7 @@ def plot_backtransform(v_APs_centered, t_AP, mean_high_centered, mean_low_center
 
     # TODO: group by AP max
     axes[0, 2].set_title('Group by $AP_{max}$')
+    axes[0, 2].axhline(0, 0, 1, color='0.5', linestyle='--')
     axes[0, 2].fill_between(t_AP, mean_high_centered + std_high, mean_high_centered - std_high,
                     facecolor='r', alpha=0.3)
     axes[0, 2].fill_between(t_AP, mean_low_centered + std_low, mean_low_centered - std_low,
@@ -408,14 +583,17 @@ def plot_backtransform(v_APs_centered, t_AP, mean_high_centered, mean_low_center
     axes[0, 2].legend(loc='lower right', fontsize=10)
 
     axes[1, 2].set_title('PCA: eigenvectors')
-    for vec in chosen_eigvecs.T:
+    axes[1, 2].axhline(0, 0, 1, color='0.5', linestyle='--')
+    for i, vec in enumerate(chosen_eigvecs.T):
         if vec[0] < 0:
             vec = vec*-1
         vec = (vec - np.min(vec)) / (np.max(vec) - np.min(vec))
         vec = vec * (ylim_max - ylim_min) + ylim_min
-        axes[1, 2].plot(t_AP, vec)
+        axes[1, 2].plot(t_AP, vec, label='expl. var.: %.2f' % expl_var[i])
+    axes[1, 2].legend(fontsize=10, loc='lower right')
 
     axes[2, 2].set_title('ICA: mixing matrix')
+    axes[2, 2].axhline(0, 0, 1, color='0.5', linestyle='--')
     for vec in ica_mixing.T:
         if vec[0] < 0:
             vec = vec * -1
@@ -425,6 +603,39 @@ def plot_backtransform(v_APs_centered, t_AP, mean_high_centered, mean_low_center
 
     pl.tight_layout()
     pl.savefig(os.path.join(save_dir_img, 'backtransform.png'))
+
+
+def get_DAP_characteristics_from_v_APs(v_APs, t_AP, AP_threshold):
+    DAP_maxs = init_nan(len(v_APs))
+    DAP_deflections = init_nan(len(v_APs))
+    dt = t_AP[1] - t_AP[0]
+    for i, v in enumerate(v_APs):
+        AP_max_idx = 0
+        v_rest = np.min(v)
+        std = np.std(v[-to_idx(2.0, dt):])
+        w = np.ones(len(v)) / std
+        fAHP_min_idx = get_fAHP_min_idx_using_splines(v, t_AP, AP_max_idx, len(t_AP), order=to_idx(1.0, dt),
+                                                      interval=to_idx(4.0, dt),
+                                                      w=w, k=3, s=None)
+        if fAHP_min_idx is not None:
+            DAP_max_idx = get_DAP_max_idx_using_splines(v, t_AP, int(fAHP_min_idx), len(t_AP), order=to_idx(1.0, dt),
+                                                        interval=to_idx(5.0, dt), min_dist_to_max=to_idx(0.5, dt),
+                                                        w=w, k=3, s=None)
+            if DAP_max_idx is not None and v[DAP_max_idx] > v[fAHP_min_idx]:
+                DAP_maxs[i] = v[DAP_max_idx]  # TODO: get_DAP_amp(v, int(DAP_max_idx), v_rest)
+                DAP_deflections[i] = get_DAP_deflection(v, int(fAHP_min_idx), int(DAP_max_idx))
+
+                # pl.figure()
+                # pl.plot(t_AP, v, 'k')
+                # pl.plot(t_AP[fAHP_min_idx], v[fAHP_min_idx], 'or')
+                # pl.plot(t_AP[DAP_max_idx], v[DAP_max_idx], 'og')
+                # pl.show()
+        # else:
+        #     pl.figure()
+        #     pl.plot(t_AP, v, 'b')
+        #     pl.show()
+
+    return DAP_maxs, DAP_deflections
 
 
 if __name__ == '__main__':
