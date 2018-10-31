@@ -21,7 +21,7 @@ def get_AP_onset_idxs(v, threshold=-30):
     return np.nonzero(np.diff(np.sign(v-threshold)) == 2)[0]
 
 
-def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None, v_diff_onset_max=None, add_noise=False):
+def get_AP_max_idx(v, AP_onset, AP_end, order=1, interval=None, v_diff_onset_max=None, add_noise=True):
     """
     Returns the index of the local maximum of the AP between AP onset and end during dur.
     :param AP_onset: Index where the membrane potential crosses the AP threshold.
@@ -230,14 +230,14 @@ def get_DAP_deflection(v, fAHP_min, DAP_max):
     return v[DAP_max] - v[fAHP_min]
 
 
-def get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest):
+def get_DAP_width_idx(v, t, fAHP_min_idx, DAP_max_idx, AP_end, vrest):
     """
     Width of the DAP (distance between the time point of the minimum of the fAHP and the time point where the
     downhill side of the DAP is closest to the half amplitude of the minimum of the fAHP).
-    :param fAHP_min: Index of the Minimum of the fAHP
-    :type fAHP_min: int
-    :param DAP_max: Index of maximum of the DAP.
-    :type DAP_max: int
+    :param fAHP_min_idx: Index of the Minimum of the fAHP
+    :type fAHP_min_idx: int
+    :param DAP_max_idx: Index of maximum of the DAP.
+    :type DAP_max_idx: int
     :param AP_end: Index of the end of the AP (e.g. delimited by the onset of the next AP or the end of the trace)
     :type AP_end: int
     :param vrest: Resting potential.
@@ -245,21 +245,22 @@ def get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest):
     :return: Idx where voltage crosses the halfwidth of the DAP.
     :rtype: int
     """
-    halfmax = (v[fAHP_min] - vrest)/2
-    halfmax_crossings = np.nonzero(np.diff(np.sign(v[DAP_max:AP_end]-vrest-halfmax)) == -2)[0]
-    if len(halfmax_crossings) == 0 or vrest+halfmax > v[fAHP_min]:
+    halfmax = (v[fAHP_min_idx] - vrest) / 2
+    halfmax_crossings = np.nonzero(np.diff(np.sign(v[DAP_max_idx:AP_end] - vrest - halfmax)) == -2)[0]
+    if len(halfmax_crossings) == 0 or vrest+halfmax > v[fAHP_min_idx]:
         return None
-    halfwidth_idx = halfmax_crossings[0] + DAP_max
+    halfwidth_idx = halfmax_crossings[0] + DAP_max_idx
     return halfwidth_idx
 
-def get_DAP_width(v, t, fAHP_min, DAP_max, AP_end, vrest):
+
+def get_DAP_width(v, t, fAHP_min_idx, DAP_max_idx, AP_end, vrest):
     """
     Width of the DAP (distance between the time point of the minimum of the fAHP and the time point where the
     downhill side of the DAP is closest to the half amplitude of the minimum of the fAHP).
-    :param fAHP_min: Index of the Minimum of the fAHP
-    :type fAHP_min: int
-    :param DAP_max: Index of maximum of the DAP.
-    :type DAP_max: int
+    :param fAHP_min_idx: Index of the Minimum of the fAHP
+    :type fAHP_min_idx: int
+    :param DAP_max_idx: Index of maximum of the DAP.
+    :type DAP_max_idx: int
     :param AP_end: Index of the end of the AP (e.g. delimited by the onset of the next AP or the end of the trace)
     :type AP_end: int
     :param vrest: Resting potential.
@@ -267,10 +268,10 @@ def get_DAP_width(v, t, fAHP_min, DAP_max, AP_end, vrest):
     :return: Width of the DAP.
     :rtype: float
     """
-    halfwidth_idx = get_DAP_width_idx(v, t, fAHP_min, DAP_max, AP_end, vrest)
+    halfwidth_idx = get_DAP_width_idx(v, t, fAHP_min_idx, DAP_max_idx, AP_end, vrest)
     if halfwidth_idx is None:
         return None
-    return t[halfwidth_idx] - t[fAHP_min]
+    return t[halfwidth_idx] - t[fAHP_min_idx]
 
 
 def get_v_rest(v, i_inj):
@@ -326,10 +327,12 @@ def get_AP_start_end(v, threshold=-45, n=0):
         return AP_onset, AP_end
     
     
-def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold=-30, AP_max_idx=None, AP_onset=None,
-                              AP_interval=None, AP_width_before_onset=0, fAHP_interval=None, std_idx_times=(None, None),
-                              k_splines=None, s_splines=None, order_fAHP_min=None, DAP_interval=None, order_DAP_max=None,
-                              min_dist_to_DAP_max=None, round_idxs=False,
+def get_spike_characteristics(v, t, return_characteristics, v_rest, std_idx_times=(None, None),
+                              AP_threshold=-10, AP_interval=None,
+                              AP_max_idx=None, AP_onset=None, AP_width_before_onset=0,
+                              k_splines=None, s_splines=None,
+                              fAHP_interval=None, order_fAHP_min=None,
+                              DAP_interval=None, order_DAP_max=None, min_dist_to_DAP_max=None,
                               check=False):
     """
     Computes the spike characteristics defined in return_characteristics.
@@ -345,7 +348,7 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
     :param AP_threshold: Threshold for detecting APs.
     :param AP_max_idx: Can be used instead of AP threshold to give the location of the AP directly. If used also need
                        to define AP_onset.
-    :param: AP_onset: Just define of AP_max_idx is used otherwise it will be inferred using AP_threshold.
+    :param: AP_onset: Just define when AP_max_idx is used otherwise it will be inferred using AP_threshold.
     :param v_rest: Resting potential.
     :type v_rest: float
     :param AP_interval: Maximal time (ms) between crossing AP threshold and AP peak.
@@ -381,33 +384,18 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
 
     characteristics = {k: None for k in return_characteristics}
 
-    if round_idxs:
-        characteristics['v_rest'] = v_rest
-        characteristics['AP_interval_idx'] = int(round(AP_interval / dt)) if not AP_interval is None else None
-        characteristics['AP_width_before_onset_idx'] = int(round(AP_width_before_onset / dt))
-        characteristics['fAHP_interval_idx'] = int(round(fAHP_interval / dt)) if not fAHP_interval is None else None
-        characteristics['std_idxs'] = [int(round(std_idx_time / dt)) if not std_idx_time is None else None
-                                       for std_idx_time in std_idx_times]
-        characteristics['k_splines'] = k_splines if not k_splines is None else 3
-        characteristics['s_splines'] = s_splines
-        characteristics['order_fAHP_min_idx'] = int(round(order_fAHP_min / dt)) if not order_fAHP_min is None else 1
-        characteristics['DAP_interval_idx'] = int(round(DAP_interval / dt)) if not DAP_interval is None else None
-        characteristics['order_DAP_max_idx'] = int(round(order_DAP_max / dt)) if not order_DAP_max is None else 1
-        characteristics['min_dist_to_DAP_max'] = int(round(min_dist_to_DAP_max /
-                                                        dt)) if not min_dist_to_DAP_max is None else None
-    else:
-        characteristics['v_rest'] = v_rest
-        characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
-        characteristics['AP_width_before_onset_idx'] = to_idx(AP_width_before_onset, dt)
-        characteristics['fAHP_interval_idx'] = to_idx(fAHP_interval, dt) if not fAHP_interval is None else None
-        characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
-                                       for std_idx_time in std_idx_times]
-        characteristics['k_splines'] = k_splines if not k_splines is None else 3
-        characteristics['s_splines'] = s_splines
-        characteristics['order_fAHP_min_idx'] = to_idx(order_fAHP_min, dt) if not order_fAHP_min is None else 1
-        characteristics['DAP_interval_idx'] = to_idx(DAP_interval, dt) if not DAP_interval is None else None
-        characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
-        characteristics['min_dist_to_DAP_max'] = to_idx(min_dist_to_DAP_max, dt) if not min_dist_to_DAP_max is None else None
+    characteristics['v_rest'] = v_rest
+    characteristics['AP_interval_idx'] = to_idx(AP_interval, dt) if not AP_interval is None else None
+    characteristics['AP_width_before_onset_idx'] = to_idx(AP_width_before_onset, dt)
+    characteristics['fAHP_interval_idx'] = to_idx(fAHP_interval, dt) if not fAHP_interval is None else None
+    characteristics['std_idxs'] = [to_idx(std_idx_time, dt) if not std_idx_time is None else None
+                                   for std_idx_time in std_idx_times]
+    characteristics['k_splines'] = k_splines if not k_splines is None else 3
+    characteristics['s_splines'] = s_splines
+    characteristics['order_fAHP_min_idx'] = to_idx(order_fAHP_min, dt) if not order_fAHP_min is None else 1
+    characteristics['DAP_interval_idx'] = to_idx(DAP_interval, dt) if not DAP_interval is None else None
+    characteristics['order_DAP_max_idx'] = to_idx(order_DAP_max, dt) if not order_DAP_max is None else 1
+    characteristics['min_dist_to_DAP_max'] = to_idx(min_dist_to_DAP_max, dt) if not min_dist_to_DAP_max is None else None
 
     if AP_max_idx is None:
         AP_onset, AP_end = get_AP_start_end(v, AP_threshold)
@@ -432,6 +420,8 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, AP_threshold
                                                AP_onset + characteristics['AP_interval_idx'],
                                                characteristics['v_rest'])
     characteristics['AP_time'] = t[characteristics['AP_max_idx']]
+    
+    characteristics['height_3ms_after_AP'] = v[characteristics['AP_max_idx'] + to_idx(3, dt)]
 
     std = np.std(v[characteristics['std_idxs'][0]:characteristics['std_idxs'][1]])
     w = np.ones(len(v)) / std
@@ -522,6 +512,8 @@ def check_measures(v, t, characteristics):
     if not characteristics.get('AP_width_idxs')[0] is None and not characteristics.get('AP_width_idxs')[1] is None:
         pl.plot(t[np.array(characteristics['AP_width_idxs'])],
                 v[np.array(characteristics['AP_width_idxs'])], '-or', label='AP_width')
+        pl.plot(t[characteristics['AP_max_idx']+to_idx(3, dt)], characteristics['height_3ms_after_AP'], 'om', 
+                label='height_3ms_after_AP')
     if not characteristics.get('fAHP_min_idx') is None:
         pl.plot(t[int(characteristics['fAHP_min_idx'])], v[int(characteristics['fAHP_min_idx'])], 'og', label='fAHP')
         if not characteristics.get('DAP_max_idx') is None:

@@ -3,20 +3,19 @@ import os
 import matplotlib.pyplot as pl
 from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
-from cell_fitting.data.plot_IV import check_v_at_i_inj_0_is_at_right_sweep_idx
-from cell_characteristics.analyze_APs import get_AP_onset_idxs, get_AP_max_idx, \
-    get_fAHP_min_idx_using_splines, get_DAP_max_idx_using_splines, get_DAP_amp, get_DAP_deflection
-from cell_characteristics import to_idx
-from cell_fitting.read_heka import get_v_and_t_from_heka, get_i_inj_from_function
 from itertools import combinations
 from sklearn.decomposition import FastICA
 from sklearn.cluster import KMeans
-from sklearn import metrics
+from sklearn import metrics, linear_model
 import copy
-from cell_fitting.util import init_nan
-from sklearn import linear_model
 import scipy.stats
 from statsmodels.robust import mad
+from cell_fitting.data.plot_IV import check_v_at_i_inj_0_is_at_right_sweep_idx
+from cell_fitting.read_heka import get_v_and_t_from_heka, get_i_inj_from_function
+from cell_fitting.util import init_nan
+from cell_characteristics.analyze_APs import get_AP_onset_idxs, get_AP_max_idx, \
+    get_fAHP_min_idx_using_splines, get_DAP_max_idx_using_splines, get_DAP_amp, get_DAP_deflection
+from cell_characteristics import to_idx
 pl.style.use('paper')
 
 
@@ -107,7 +106,8 @@ def plot_APs(v_APs, t_AP, save_dir_img):
     pl.ylabel('Membrane potential (mV)')
     pl.xlabel('Time (ms)')
     pl.tight_layout()
-    pl.savefig(save_dir_img)
+    if save_dir_img is not None:
+        pl.savefig(save_dir_img)
 
 
 def plots_stc(v_APs, t_AP, back_projection, chosen_eigvecs, expl_var, save_dir_img):

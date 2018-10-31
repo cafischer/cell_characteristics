@@ -10,10 +10,11 @@ def to_idx(time_point, dt, decimal_place=None):
         assert np.round(idx * dt, decimal_place) == np.round(time_point, decimal_place), \
             'Time points given are not uniquely identifiable given dt. ' \
             'time_point: %f, dt: %f' % (time_point, dt)
+        return int(np.round(idx, 0))  # rounding necessary because conversion to int sometimes weird
     else:
         assert idx * dt == time_point, 'Time points given are not uniquely identifiable given dt. ' \
                                        'time_point: %f, dt: %f' % (time_point, dt)
-    return int(idx)
+        return int(np.round(idx, 0))  # rounding necessary because conversion to int sometimes weird
 
 
 def exp_fit(t, a, v):
