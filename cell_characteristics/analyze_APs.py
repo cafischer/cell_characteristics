@@ -421,7 +421,7 @@ def get_spike_characteristics(v, t, return_characteristics, v_rest, std_idx_time
                                                characteristics['v_rest'])
     characteristics['AP_time'] = t[characteristics['AP_max_idx']]
     
-    characteristics['height_3ms_after_AP'] = v[characteristics['AP_max_idx'] + to_idx(3, dt)]
+    #characteristics['height_3ms_after_AP'] = v[characteristics['AP_max_idx'] + to_idx(3, dt)]
 
     std = np.std(v[characteristics['std_idxs'][0]:characteristics['std_idxs'][1]])
     w = np.ones(len(v)) / std
@@ -512,8 +512,8 @@ def check_measures(v, t, characteristics):
     if not characteristics.get('AP_width_idxs')[0] is None and not characteristics.get('AP_width_idxs')[1] is None:
         pl.plot(t[np.array(characteristics['AP_width_idxs'])],
                 v[np.array(characteristics['AP_width_idxs'])], '-or', label='AP_width')
-        pl.plot(t[characteristics['AP_max_idx']+to_idx(3, dt)], characteristics['height_3ms_after_AP'], 'om', 
-                label='height_3ms_after_AP')
+        #pl.plot(t[characteristics['AP_max_idx']+to_idx(3, dt)], characteristics['height_3ms_after_AP'], 'om',
+        #        label='height_3ms_after_AP')
     if not characteristics.get('fAHP_min_idx') is None:
         pl.plot(t[int(characteristics['fAHP_min_idx'])], v[int(characteristics['fAHP_min_idx'])], 'og', label='fAHP')
         if not characteristics.get('DAP_max_idx') is None:
